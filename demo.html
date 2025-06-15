@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Page - Judol Content Detection</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 20px;
+        background-color: #f4f4f4;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .section {
+        margin: 20px 0;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      .safe-content {
+        background-color: #e8f5e8;
+        border-color: #4caf50;
+      }
+      .suspicious-content {
+        background-color: #ffe8e8;
+        border-color: #f44336;
+      }
+      h1,
+      h2 {
+        color: #333;
+      }
+      .banner {
+        background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+        color: white;
+        padding: 20px;
+        text-align: center;
+        margin: 20px 0;
+        border-radius: 10px;
+      }
+      .promo-box {
+        background: #ffeb3b;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 10px 0;
+        text-align: center;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Demo Page for Judol Detection Engine</h1>
+      <p>
+        This page contains both safe and potentially suspicious content to test
+        the extension.
+      </p>
+
+      <!-- Safe Content Section -->
+      <div class="section safe-content">
+        <h2>Safe Content Examples</h2>
+        <p>
+          Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga
+          tercinta.
+        </p>
+        <p>
+          Tutorial programming Python untuk pemula dengan contoh kode yang
+          lengkap.
+        </p>
+        <p>
+          Berita terkini tentang teknologi dan inovasi terbaru di Indonesia.
+        </p>
+        <p>
+          Tips kesehatan dan olahraga untuk menjaga kondisi tubuh tetap prima.
+        </p>
+      </div>
+
+      <!-- Suspicious Content Section -->
+      <div class="section suspicious-content">
+        <h2>Suspicious Content Examples (Will be flagged)</h2>
+
+        <div class="banner">
+          <h2>🎰 SLOT GACOR MAXWIN HARI INI! 🎰</h2>
+          <p>RTP Live Pragmatic Play Tertinggi - Anti Rungkad!</p>
+        </div>
+
+        <div class="promo-box">
+          <p>
+            ⚡ Daftar situs judi online terpercaya sekarang! Bonus new member
+            100%! ⚡
+          </p>
+        </div>
+
+        <p>
+          Nikmati permainan <strong>slot gacor</strong> dengan
+          <strong>RTP live</strong> tertinggi di situs kami.
+          <strong>Pragmatic Play</strong> dan <strong>PG Soft</strong> provider
+          terbaik!
+        </p>
+
+        <p>
+          Minimal <strong>deposit</strong> hanya 10 ribu rupiah untuk
+          mendapatkan <strong>maxwin</strong> jutaan!
+        </p>
+
+        <p>
+          Link alternatif <strong>titan777</strong> dan
+          <strong>988slot</strong> tersedia 24 jam. <strong>Scatter</strong> dan
+          <strong>jackpot</strong> menanti Anda!
+        </p>
+
+        <p>
+          Bergabunglah dengan <strong>agen</strong> terpercaya dan rasakan
+          sensasi <strong>bet</strong> dengan <strong>jam hoki</strong> yang
+          tepat untuk mendapatkan <strong>scatter</strong>!
+        </p>
+
+        <a
+          href="#"
+          style="
+            background: #f44336;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 5px;
+          "
+        >
+          🎮 DAFTAR SLOT GACOR SEKARANG! 🎮
+        </a>
+      </div>
+
+      <!-- Mixed Content Section -->
+      <div class="section">
+        <h2>Mixed Content</h2>
+        <p>
+          Artikel ini membahas tentang teknologi terbaru dalam industri
+          <strong>game</strong> <strong>online</strong>.
+        </p>
+        <p>
+          Namun, ada juga pembahasan tentang <strong>slot</strong> machine dalam
+          konteks kasino tradisional.
+        </p>
+        <p>
+          Penting untuk memahami perbedaan antara hiburan yang sehat dan
+          aktivitas yang berisiko.
+        </p>
+      </div>
+
+      <!-- Footer -->
+      <div class="section safe-content">
+        <h2>About This Demo</h2>
+        <p>
+          This page is created to test the Judol Detection Engine. The extension
+          should:
+        </p>
+        <ul>
+          <li>Highlight or blur suspicious gambling-related content</li>
+          <li>Show warnings for high-risk content</li>
+          <li>Display analysis results in the extension popup</li>
+          <li>Leave safe content untouched</li>
+        </ul>
+        <p>Check the extension popup to see the detailed analysis results!</p>
+      </div>
+    </div>
+
+    <script>
+      // Add some dynamic content for testing
+      setTimeout(() => {
+        const dynamicContent = document.createElement("div");
+        dynamicContent.className = "section suspicious-content";
+        dynamicContent.innerHTML = `
+                <h2>Dynamic Content (Added via JavaScript)</h2>
+                <p>Dapatkan <strong>gacor108</strong> dan <strong>spinbet99</strong> dengan <strong>pola slot</strong> terbaik!</p>
+                <p>Main di <strong>multibet88</strong> dan <strong>homebet88</strong> untuk pengalaman <strong>toto</strong> yang menguntungkan!</p>
+            `;
+        document.querySelector(".container").appendChild(dynamicContent);
+        console.log("Dynamic suspicious content added!");
+      }, 3000);
+    </script>
+  </body>
+</html>
