@@ -19,6 +19,13 @@ class JudolDetector:
             self.keywords_df['Keyword'].str.lower(), 
             self.keywords_df['Score']
         ))
+        self.regex_patterns = {
+            r'\w*bet\d+': 15,
+            r'\w*slot\d+': 15,
+            r'\w*toto\d+': 15,
+            r'gacor\d+': 15,
+            r'hoki\d+': 12
+        }
         self.vectorizer = TfidfVectorizer(
             max_features=5000,
             ngram_range=(1, 3),
@@ -71,6 +78,13 @@ class JudolDetector:
                 total_score += score * count
                 matched_keywords.extend([keyword] * count)
         
+        for pattern, score in self.regex_patterns.items():
+            matches = re.findall(pattern, text)
+            if matches:
+                count = len(matches)
+                total_score += score * count
+                matched_keywords.extend(matches)
+
         # Additional features
         features = {
             'keyword_score': total_score,
@@ -104,6 +118,26 @@ class JudolDetector:
         
         # Negative samples (clean content)
         negative_samples = [
+            "Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga tercinta.",
+            "Tutorial programming Python untuk pemula dengan contoh kode yang lengkap.",
+            "Berita terkini tentang teknologi dan inovasi terbaru di Indonesia.",
+            "Tips kesehatan dan olahraga untuk menjaga kondisi tubuh tetap prima.",
+            "Panduan lengkap cara menanam bunga mawar di halaman rumah.",
+            "Review mendalam mengenai kamera mirrorless terbaru di pasaran.",
+            "Sejarah kemerdekaan Indonesia dan perjuangan para pahlawan.",
+            "Diskusi mengenai dampak kecerdasan buatan terhadap pasar kerja.",
+            "Cara efektif mengelola keuangan pribadi untuk mencapai kebebasan finansial.",
+            "Belajar bahasa Inggris otodidak melalui film dan musik.",
+            "Kumpulan resep kue kering untuk Lebaran yang renyah dan nikmat.",
+            "Analisis pertandingan sepak bola antara tim nasional Indonesia dan Vietnam.",
+            "Tips dan trik fotografi landscape untuk pemula.",
+            "Pentingnya pendidikan karakter sejak usia dini bagi perkembangan anak.",
+            "Menjelajahi keindahan alam bawah laut di Raja Ampat, Papua.",
+            "Teknik dasar bermain gitar untuk pemula, dari kunci dasar hingga melodi sederhana.",
+            "Perkembangan terbaru dalam penelitian sel punca untuk pengobatan penyakit degeneratif.",
+            "Cara membuat pupuk kompos dari sampah organik rumah tangga.",
+            "Ulasan buku fiksi ilmiah terbaik sepanjang masa yang wajib dibaca.",
+            "Membangun portofolio desain grafis yang menarik bagi calon klien.",
             "Resep masakan Indonesia yang lezat",
             "Tutorial belajar programming Python",
             "Berita terkini politik dan ekonomi",
@@ -124,6 +158,16 @@ class JudolDetector:
             "Artikel sejarah dan budaya",
             "Tips fotografi dan videografi",
             "Panduan DIY dan kerajinan",
+            "Cara membuat kue bolu yang empuk dan lezat",
+            "Tutorial menjahit baju untuk pemula",
+            "Belajar bermain gitar dengan mudah",
+            "Tips menanam sayuran hidroponik di rumah",
+            "Panduan lengkap ibadah haji dan umroh",
+            "Kumpulan doa-doa harian untuk anak",
+            "Cerita nabi dan rasul untuk anak-anak",
+            "Belajar bahasa Arab dasar untuk pemula",
+            "Peluang bisnis online di tahun 2025",
+            "Strategi marketing digital untuk UMKM",
         ] * 50  # Multiply to balance the dataset
         
         # Create DataFrame
@@ -283,7 +327,7 @@ class JudolDetector:
             result = self.predict(element_text)
             
             # Use a higher confidence threshold to reduce false positives
-            if result['is_judol'] and result['confidence'] > 0.8:
+            if result['is_judol'] and result['confidence'] > 0.7:
                 # Get element selector
                 selector = self._generate_css_selector(element)
                 
@@ -325,16 +369,12 @@ class JudolDetector:
     
     def _generate_css_selector(self, element):
         """Generate a specific CSS selector for an element"""
-        # If element has an ID, use it as it should be unique
         if element.get('id'):
             return f"#{element.get('id')}"
         
-        # Build a more specific selector by traversing up the DOM
-        selector_parts = []
+        path_parts = []
         current = element
         
-        # Go up the DOM tree to create a specific path
-        path_parts = []
         for _ in range(5):  # Limit depth to avoid overly long selectors
             if current is None or current.name is None:
                 break
@@ -342,39 +382,41 @@ class JudolDetector:
             part = current.name
             
             # Add class information if available
-            if current.get('class') and len(current.get('class')) > 0:
-                # Use first class to avoid overly complex selectors
-                first_class = current.get('class')[0]
-                part += f".{first_class}"
+            if current.get('class'):
+                classes = '.'.join(current.get('class'))
+                if classes:
+                    part += f".{classes}"
             
-            # Add nth-child if there are siblings of the same type
+            # Add nth-of-type if there are siblings of the same type
             if current.parent:
-                siblings = [sibling for sibling in current.parent.children 
-                           if hasattr(sibling, 'name') and sibling.name == current.name]
+                siblings = current.parent.find_all(current.name, recursive=False)
                 if len(siblings) > 1:
                     try:
-                        index = siblings.index(current) + 1
-                        part += f":nth-child({index})"
-                    except ValueError:
-                        pass
+                        index = [i for i, s in enumerate(siblings) if s is current][0]
+                        part += f":nth-of-type({index + 1})"
+                    except (ValueError, IndexError):
+                        pass # Could fail if element is not in siblings, though it should be
             
             path_parts.append(part)
             current = current.parent
             
-            # Stop if we reach body or html
-            if current and current.name in ['body', 'html']:
+            # Stop if we reach a good anchor (body, html, or an element with an ID)
+            if current is None or current.name in ['body', 'html'] or current.get('id'):
+                if current and current.get('id'):
+                    path_parts.append(f"#{current.get('id')}")
                 break
         
         # Reverse to get top-down path and join with descendant combinator
         if path_parts:
             path_parts.reverse()
-            return ' > '.join(path_parts)
+            return ' '.join(path_parts)
         
-        # Fallback: use tag name with classes
+        # Fallback for elements that couldn't generate a path
         selector = element.name
         if element.get('class'):
-            classes = '.'.join(element.get('class')[:2])  # Limit to first 2 classes
-            selector += f".{classes}"
+            classes = '.'.join(element.get('class')[:2])
+            if classes:
+                selector += f".{classes}"
         
         return selector
     

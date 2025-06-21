@@ -42,10 +42,13 @@ let settings: Settings = {
 
 // Initialize the content script
 async function init() {
+  console.log("Judol Detector: Initializing content script.")
   // Get settings
   settings = await getSettings()
+  console.log("Judol Detector: Settings loaded:", settings)
 
   if (!settings.enabled) {
+    console.log("Judol Detector: Extension is disabled. Exiting.")
     return
   }
 
@@ -65,7 +68,7 @@ async function getSettings(): Promise<Settings> {
     const blockingMode = await storage.get("blockingMode")
     const showNotifications = await storage.get("showNotifications")
 
-    return {
+    const loadedSettings = {
       enabled: enabled === undefined ? true : Boolean(enabled),
       threshold: typeof threshold === "number" ? threshold : 0.5,
       blockingMode: (["highlight", "blur", "hide"].includes(blockingMode)
@@ -74,6 +77,8 @@ async function getSettings(): Promise<Settings> {
       showNotifications:
         showNotifications === undefined ? true : Boolean(showNotifications)
     }
+    console.log("Judol Detector: Loaded settings from storage:", loadedSettings)
+    return loadedSettings
   } catch (error) {
     console.error("Failed to load settings:", error)
     return {
@@ -99,6 +104,10 @@ function isPageStructureElement(element: HTMLElement): boolean {
   ]
 
   if (criticalTags.includes(tagName)) {
+    console.log(
+      `Judol Detector: Element <${tagName}> is a critical tag.`,
+      element
+    )
     return true
   }
 
@@ -117,15 +126,26 @@ function isPageStructureElement(element: HTMLElement): boolean {
     "main"
   ]
 
-  return criticalClasses.some((cls) =>
-    classList.some((elementClass) => elementClass.toLowerCase().includes(cls))
+  // Use exact match to avoid false positives on partial class names
+  const isCritical = criticalClasses.some((cls) =>
+    classList.some((elementClass) => elementClass.toLowerCase() === cls)
   )
+
+  if (isCritical) {
+    console.log(`Judol Detector: Element has a critical class.`, element)
+  }
+
+  return isCritical
 }
 
 // Start content analysis
 async function startAnalysis() {
-  if (isAnalyzing) return
+  if (isAnalyzing) {
+    console.log("Judol Detector: Analysis already in progress.")
+    return
+  }
 
+  console.log("Judol Detector: Starting content analysis.")
   isAnalyzing = true
 
   try {
@@ -137,11 +157,18 @@ async function startAnalysis() {
     }
 
     // Send to background script for analysis
+    console.log(
+      "Judol Detector: Sending page data to background script for analysis."
+    )
     const response = (await sendMessage({
       action: "analyzeContent",
       data: pageData
     })) as any
 
+    console.log(
+      "Judol Detector: Received analysis response from background script:",
+      response
+    )
     if (response?.success) {
       analysisResults = response.data
       processAnalysisResults()
@@ -157,14 +184,29 @@ async function startAnalysis() {
 
 // Process analysis results
 function processAnalysisResults() {
+  console.log("Judol Detector: Processing analysis results:", analysisResults)
+
+  // Start observing for future DOM changes
+  observeDynamicContent()
+
   if (!analysisResults || !analysisResults.overall.is_judol) {
+    console.log(
+      "Judol Detector: No suspicious content found or analysis results are missing."
+    )
     return
   }
 
   const confidence = analysisResults.overall.confidence
   const threshold = settings.threshold
+  console.log(
+    `Judol Detector: Overall confidence: ${confidence}, Threshold: ${threshold}`
+  )
 
   if (confidence >= threshold) {
+    console.log(
+      "Judol Detector: Confidence is above threshold. Applying blocking mode:",
+      settings.blockingMode
+    )
     // Apply blocking based on mode
     if (settings.blockingMode === "highlight") {
       highlightSuspiciousContent()
@@ -188,12 +230,20 @@ function processAnalysisResults() {
 
 // Highlight suspicious content
 function highlightSuspiciousContent() {
-  if (!analysisResults?.suspicious_elements) return
+  console.log("Judol Detector: Highlighting suspicious content.")
+  if (!analysisResults?.suspicious_elements) {
+    console.log("Judol Detector: No suspicious elements to highlight.")
+    return
+  }
 
   analysisResults.suspicious_elements.forEach((element) => {
+    console.log(`Judol Detector: Checking element for highlighting:`, element)
     if (element.confidence >= settings.threshold) {
       try {
         const domElements = document.querySelectorAll(element.selector)
+        console.log(
+          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}"`
+        )
 
         // Safety check: don't highlight too many elements at once
         if (domElements.length > 10) {
@@ -211,9 +261,14 @@ function highlightSuspiciousContent() {
             htmlElement.hasAttribute("data-judol-highlighted") ||
             isPageStructureElement(htmlElement)
           ) {
+            console.log(
+              "Judol Detector: Skipping element for highlighting (already highlighted or is a structure element).",
+              htmlElement
+            )
             return
           }
 
+          console.log("Judol Detector: Highlighting element:", htmlElement)
           // Apply highlighting styles
           htmlElement.style.border = "2px solid #ef4444"
           htmlElement.style.backgroundColor = "rgba(239, 68, 68, 0.1)"
@@ -242,12 +297,20 @@ function highlightSuspiciousContent() {
 
 // Blur suspicious content
 function blurSuspiciousContent() {
-  if (!analysisResults?.suspicious_elements) return
+  console.log("Judol Detector: Blurring suspicious content.")
+  if (!analysisResults?.suspicious_elements) {
+    console.log("Judol Detector: No suspicious elements to blur.")
+    return
+  }
 
   analysisResults.suspicious_elements.forEach((element) => {
+    console.log(`Judol Detector: Checking element for blurring:`, element)
     if (element.confidence >= settings.threshold) {
       try {
         const domElements = document.querySelectorAll(element.selector)
+        console.log(
+          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}"`
+        )
 
         // Safety check: don't blur too many elements at once
         if (domElements.length > 10) {
@@ -265,9 +328,14 @@ function blurSuspiciousContent() {
             htmlElement.hasAttribute("data-judol-blurred") ||
             isPageStructureElement(htmlElement)
           ) {
+            console.log(
+              "Judol Detector: Skipping element for blurring (already blurred or is a structure element).",
+              htmlElement
+            )
             return
           }
 
+          console.log("Judol Detector: Blurring element:", htmlElement)
           // Apply blur styles
           htmlElement.style.filter = "blur(5px)"
           htmlElement.style.pointerEvents = "none"
@@ -296,12 +364,20 @@ function blurSuspiciousContent() {
 
 // Hide suspicious content
 function hideSuspiciousContent() {
-  if (!analysisResults?.suspicious_elements) return
+  console.log("Judol Detector: Hiding suspicious content.")
+  if (!analysisResults?.suspicious_elements) {
+    console.log("Judol Detector: No suspicious elements to hide.")
+    return
+  }
 
   analysisResults.suspicious_elements.forEach((element) => {
+    console.log(`Judol Detector: Checking element for hiding:`, element)
     if (element.confidence >= settings.threshold) {
       try {
         const domElements = document.querySelectorAll(element.selector)
+        console.log(
+          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}"`
+        )
 
         // Safety check: don't hide too many elements at once
         if (domElements.length > 10) {
@@ -319,9 +395,14 @@ function hideSuspiciousContent() {
             htmlElement.hasAttribute("data-judol-hidden") ||
             isPageStructureElement(htmlElement)
           ) {
+            console.log(
+              "Judol Detector: Skipping element for hiding (already hidden or is a structure element).",
+              htmlElement
+            )
             return
           }
 
+          console.log("Judol Detector: Hiding element:", htmlElement)
           // Store original display value before hiding
           htmlElement.setAttribute(
             "data-judol-original-display",
@@ -399,6 +480,47 @@ function clearHighlights() {
     htmlElement.removeAttribute("data-judol-hidden")
     htmlElement.removeAttribute("data-judol-original-display")
   })
+}
+
+let observer: MutationObserver | null = null
+let debounceTimeout: number
+
+// Observe for dynamic content changes
+function observeDynamicContent() {
+  if (observer) {
+    return // Already observing
+  }
+
+  const targetNode = document.body
+  if (!targetNode) {
+    console.log("Judol Detector: Could not find document.body to observe.")
+    return
+  }
+
+  const config = { childList: true, subtree: true }
+
+  const callback = function (
+    mutationsList: MutationRecord[],
+    obs: MutationObserver
+  ) {
+    const hasAddedNodes = mutationsList.some((m) => m.addedNodes.length > 0)
+
+    if (hasAddedNodes) {
+      console.log("Judol Detector: Dynamic content change detected.")
+      window.clearTimeout(debounceTimeout)
+      debounceTimeout = window.setTimeout(() => {
+        console.log("Judol Detector: Re-running analysis for dynamic content.")
+        clearHighlights()
+        startAnalysis()
+      }, 1000) // 1-second debounce
+    }
+  }
+
+  observer = new MutationObserver(callback)
+  observer.observe(targetNode, config)
+  console.log(
+    "Judol Detector: MutationObserver is now watching for dynamic content."
+  )
 }
 
 // Send message to background script
