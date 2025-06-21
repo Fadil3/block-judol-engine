@@ -12,12 +12,20 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  redis:
+    image: "redis:alpine"
+    restart: always
+    ports:
+      - "6380:6379"
 
   # Optional: Add a simple web server for serving static files (demo.html, etc.)
   web:

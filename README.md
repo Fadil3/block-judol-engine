@@ -1,85 +1,120 @@
 # Judol Detection Engine
 
-A comprehensive system to detect and block online gambling (judol) content using Machine Learning and browser extension technology.
+A comprehensive, high-performance system to detect and block online gambling (judol) content using Machine Learning, OCR, and a browser extension.
 
-## 🚀 Features
+## 🚀 Core Features
 
-### ML Detection Engine
+### High-Performance Backend
 
-- **Keyword-based scoring** using your comprehensive keyword list
-- **TF-IDF text analysis** for context understanding
-- **Random Forest classifier** for accurate content detection
-- **RESTful API** for integration with web extensions
-- **HTML element analysis** to identify specific suspicious content
+- **Multi-faceted Detection:** Combines ML (TF-IDF + Random Forest), ultra-fast keyword matching (`Aho-Corasick`), and OCR for image analysis (`Tesseract`).
+- **Persistent Caching:** Utilizes **Redis** to cache text and image analysis results, dramatically reducing latency on repeated content.
+- **Optimized Data Handling:** Uses `Polars` for high-speed CSV loading, replacing pandas for better performance.
+- **Robust Element Selection:** Generates stable CSS selectors to precisely target and act on suspicious content.
+- **Containerized Deployment:** Fully containerized with Docker and `docker-compose` for easy setup and scalability.
 
-### Browser Extension
+### Browser Extension (Plasmo)
 
-- **Real-time content analysis** of web pages
-- **Multiple blocking modes**: Highlight, Blur, or Hide suspicious content
-- **Adjustable sensitivity** threshold
-- **Visual warnings** for high-risk pages
-- **Cross-browser compatibility** (Chrome, Edge, Firefox)
+- **Real-time & Dynamic Content Analysis:** Scans pages on load and monitors for new content added dynamically using `MutationObserver`.
+- **Image and Text Analysis:** Extracts both text and images from the page and sends them to the backend for deep analysis.
+- **Multiple Blocking Modes:** Offers "Highlight", "Blur", or "Hide" modes for detected content.
+- **User-friendly Interface:** Simple popup to control settings and view page status.
+
+## 🏛️ System Architecture
+
+This diagram illustrates how the browser extension and backend services work together to detect and censor content.
+
+```mermaid
+graph TD
+    subgraph "User's Browser"
+        A[Web Page Content] --> B{Browser Extension};
+        B -- "1. Extracts Text & Images" --> C[API Server];
+        C -- "6. Returns Bad Selectors" --> B;
+        B -- "7. Blocks/Blurs Content" --> D[DOM];
+        E[Dynamic Content] -- "MutationObserver" --> B;
+    end
+
+    subgraph "Backend Infrastructure (Docker)"
+        subgraph "API Server (Python/FastAPI)"
+            C -- "2. Receives Request" --> F{Judol Detector};
+            F -- "3. Analyze Text" --> G[Text Analysis Pipeline];
+            F -- "4. Analyze Images" --> H[Image Analysis Pipeline];
+        end
+
+        subgraph "Caching Layer"
+            I[Redis Cache]
+        end
+
+        G -- "Check & Store" --> I;
+        H -- "Check & Store" --> I;
+
+        subgraph "Analysis Engines"
+            G --> J[Aho-Corasick Keyword Matcher];
+            G --> K[TF-IDF + ML Model];
+            H --> L[Tesseract OCR Engine];
+        end
+
+        J -- "5. Generates" --> M[Bad Selectors];
+        K -- "5. Generates" --> M;
+        L -- "5. Generates" --> M;
+        M --> C;
+    end
+
+    style B fill:#7CB9E8,stroke:#333,stroke-width:2px
+    style C fill:#90EE90,stroke:#333,stroke-width:2px
+    style I fill:#FFDAB9,stroke:#333,stroke-width:2px
+```
 
 ## 📁 Project Structure
 
 ```
 block-judol-engine/
-├── keywords.csv              # Your judol keywords with scores
-├── judol_detector.py         # ML detection engine
-├── api_server.py            # FastAPI server
-├── requirements.txt         # Python dependencies
-├── setup.sh                # Setup script
-├── models/                 # Trained ML models (created after training)
-└── extension/              # Browser extension
-    ├── manifest.json       # Extension manifest
-    ├── background.js       # Background service worker
-    ├── content.js          # Content script for page analysis
-    ├── content.css         # Styles for blocking/highlighting
-    ├── popup.html          # Extension popup interface
-    ├── popup.js            # Popup functionality
-    └── icons/              # Extension icons
+├── judol_detector.py         # Core detection logic (ML, OCR, Caching)
+├── api_server.py             # FastAPI server
+├── keywords.csv              # Judol keywords for the Aho-Corasick matcher
+├── requirements.txt          # Python dependencies
+├── Dockerfile                # Docker build instructions for the API
+├── docker-compose.yml        # Docker services definition (API + Redis)
+├── models/
+│   ├── judol_model.pkl       # Trained Random Forest model
+│   └── vectorizer.pkl        # Trained TF-IDF vectorizer
+└── plasmo-extension/         # Browser extension source (Plasmo)
+    ├── contents/
+    │   └── judol-detector.ts # Content script for page analysis
+    ├── background.ts         # Background service worker
+    ├── popup.tsx             # Extension popup UI (React)
+    └── package.json          # Node.js dependencies
 ```
 
-## 🛠️ Setup Instructions
+## 🛠️ Setup & Deployment
 
-### 1. Quick Setup
+The entire system is designed to run in Docker containers for consistency and ease of deployment.
 
-```bash
-chmod +x setup.sh
-./setup.sh
-```
+### Prerequisites
 
-### 2. Manual Setup
+- Docker
+- Docker Compose
 
-#### Python Environment
+### Running the System
 
-```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+1.  **Start the services:**
 
-# Install dependencies
-pip install -r requirements.txt
+    ```bash
+    docker-compose up --build
+    ```
 
-# Train the model
-python judol_detector.py
-```
+    This command will:
 
-#### Start API Server
+    - Build the Docker image for the API server, installing all Python dependencies and Tesseract OCR.
+    - Pull the official Redis image.
+    - Start both the API server and the Redis cache.
 
-```bash
-source venv/bin/activate
-python api_server.py
-```
+    The API will be available at `http://localhost:8000`.
 
-The API will be available at `http://localhost:8000`
-
-#### Install Browser Extension
-
-1. Open Chrome/Edge and navigate to `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Load unpacked" and select the `extension` folder
-4. The extension will appear in your browser toolbar
+2.  **Install the Browser Extension:**
+    - Navigate to `chrome://extensions/`.
+    - Enable "Developer mode".
+    - Click "Load unpacked" and select the `plasmo-extension/build/chrome-mv3-dev` directory.
+    - The extension will be installed and ready to use.
 
 ## 🔧 Usage
 
@@ -91,14 +126,6 @@ The API will be available at `http://localhost:8000`
 curl http://localhost:8000/health
 ```
 
-#### Analyze Text
-
-```bash
-curl -X POST http://localhost:8000/predict/text \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Slot gacor maxwin hari ini!", "threshold": 0.5}'
-```
-
 #### Analyze HTML Content
 
 ```bash
@@ -107,100 +134,37 @@ curl -X POST http://localhost:8000/analyze/html \
   -d '{"html": "<html>...</html>", "url": "https://example.com"}'
 ```
 
-#### Get Keywords
-
-```bash
-curl http://localhost:8000/keywords
-```
-
 ### Browser Extension
 
-1. **Automatic Detection**: The extension automatically scans pages you visit
-2. **Visual Indicators**: Suspicious content is highlighted/blurred/hidden based on your settings
-3. **Popup Control**: Click the extension icon to view page analysis and adjust settings
-4. **Blocking Modes**:
-   - **Highlight**: Red border around suspicious content
-   - **Blur**: Blur suspicious content with click-to-reveal
-   - **Hide**: Completely hide suspicious content with show button
+- **Automatic Detection**: The extension automatically scans pages you visit.
+- **Popup Control**: Click the extension icon to adjust sensitivity and blocking modes.
+- **Blocking Modes**:
+  - **Highlight**: Red border around suspicious content.
+  - **Blur**: Blur suspicious content with a click-to-reveal option.
+  - **Hide**: Completely hide suspicious content.
 
-## 🤖 Machine Learning Details
+## 🤖 Machine Learning & Detection Details
 
-### Features Used
+### Detection Layers
 
-- **Keyword Scoring**: Based on your curated keyword list with weights
-- **TF-IDF Vectors**: Term frequency analysis of text content
-- **Text Statistics**: Length, word count, keyword density
-- **N-gram Analysis**: 1-3 word combinations for context
+1.  **Redis Cache**: The first stop. If content (text hash or image URL) has been analyzed before, the cached result is returned instantly.
+2.  **Aho-Corasick Keyword Matching**: An extremely fast algorithm checks for thousands of keywords in parallel. It's the primary filter for text-based content.
+3.  **TF-IDF + Random Forest**: If keyword matching is inconclusive, the text is vectorized and passed to the ML model for a deeper contextual analysis.
+4.  **Tesseract OCR**: For images, Tesseract extracts any embedded text, which is then run through the same text analysis pipeline (caching and keyword matching). Small images are skipped to optimize performance.
 
-### Model Training
+### Performance
 
-- **Synthetic Data Generation**: Creates training samples using your keywords
-- **Balanced Dataset**: Equal positive/negative samples
-- **Random Forest**: Ensemble method for robust classification
-- **Cross-validation**: 80/20 train/test split
-
-### Performance Metrics
-
-The model achieves high accuracy on the synthetic dataset and can be improved with real-world data.
-
-## 📊 Customization
-
-### Adding Keywords
-
-Edit `keywords.csv` to add new judol-related terms:
-
-```csv
-Keyword,Score
-new_term,10
-high_risk_term,15
-```
-
-### Adjusting Thresholds
-
-- **API**: Use the `threshold` parameter in requests (0.0-1.0)
-- **Extension**: Adjust sensitivity in the popup interface
-
-### Blocking Modes
-
-Configure how suspicious content is handled:
-
-- `highlight`: Visual indicators only
-- `blur`: Blur content with reveal option
-- `hide`: Completely hide with manual reveal
-
-## 🔒 Security Considerations
-
-- The extension requires minimal permissions
-- All analysis is done locally or on your controlled API server
-- No user data is collected or transmitted to third parties
-- API can be configured with authentication for production use
-
-## 🚀 Deployment
-
-### Production API
-
-For production deployment, consider:
-
-- Using a proper WSGI server (Gunicorn, uWSGI)
-- Adding authentication middleware
-- Setting up HTTPS
-- Implementing rate limiting
-- Adding monitoring and logging
-
-### Extension Distribution
-
-- Package the extension for Chrome Web Store
-- Set up proper API endpoints for production
-- Configure CSP (Content Security Policy)
-- Add telemetry for improvement
+- **Caching**: Redis caching provides sub-millisecond response times for previously seen content.
+- **Aho-Corasick**: Offers significant performance gains over traditional regex or simple string matching, making text analysis very fast.
+- **Polars**: Loading the `keywords.csv` file is optimized using the Polars library.
 
 ## 🤝 Contributing
 
-1. Add more sophisticated ML features
-2. Improve keyword detection algorithms
-3. Add support for more languages
-4. Enhance UI/UX of the extension
-5. Add unit tests for better reliability
+- Add more sophisticated ML features (e.g., image classification models).
+- Improve OCR accuracy and performance.
+- Add support for more languages in both keywords and OCR.
+- Enhance the extension UI/UX.
+- Add comprehensive unit and integration tests.
 
 ## 📜 License
 
@@ -208,4 +172,4 @@ This project is for educational and protection purposes. Use responsibly and in 
 
 ## ⚠️ Disclaimer
 
-This tool is designed to help users avoid unwanted gambling content. It should not be the only measure for content filtering and may not catch all variations of gambling content. Users should exercise their own judgment when browsing online.
+This tool is designed to help users avoid unwanted gambling content. It is not infallible and may not catch all variations of such content. Users should exercise their own judgment when browsing online.

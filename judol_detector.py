@@ -1,4 +1,3 @@
-import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
@@ -11,14 +10,24 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 import os
+import io
+import requests
+from PIL import Image
+import pytesseract
+import redis
+import json
+import ahocorasick
+import polars as pl
 
 class JudolDetector:
     def __init__(self, keywords_file='keywords.csv'):
-        self.keywords_df = pd.read_csv(keywords_file)
+        # --- Polars Optimization ---
+        self.keywords_df = pl.read_csv(keywords_file)
         self.keywords_dict = dict(zip(
-            self.keywords_df['Keyword'].str.lower(), 
+            self.keywords_df['Keyword'].str.to_lowercase(),
             self.keywords_df['Score']
         ))
+        # --- End Polars Optimization ---
         self.regex_patterns = {
             r'\w*bet\d+': 15,
             r'\w*slot\d+': 15,
@@ -34,6 +43,27 @@ class JudolDetector:
         self.model = None
         self.threshold = 0.5
         
+        # Caches to avoid re-processing the same content within a single analysis
+        # self.text_prediction_cache = {}
+        # self.image_analysis_cache = {}
+        try:
+            self.redis_conn = redis.Redis(host='redis', port=6379, db=0)
+            self.redis_conn.ping()
+            print("Successfully connected to Redis.")
+            self.cache_enabled = True
+        except redis.exceptions.ConnectionError as e:
+            print(f"Could not connect to Redis: {e}. Caching will be disabled.")
+            self.cache_enabled = False
+
+
+        # --- Aho-Corasick Optimization ---
+        # Using pyahocorasick for ultra-fast multi-keyword matching
+        self.automaton = ahocorasick.Automaton()
+        for keyword, score in self.keywords_dict.items():
+            self.automaton.add_word(keyword, (keyword, score))
+        self.automaton.make_automaton()
+        # --- End of Aho-Corasick Optimization ---
+
         # Download NLTK data if not present
         try:
             nltk.data.find('tokenizers/punkt')
@@ -72,11 +102,11 @@ class JudolDetector:
         total_score = 0
         matched_keywords = []
         
-        for keyword, score in self.keywords_dict.items():
-            if keyword in text:
-                count = text.count(keyword)
-                total_score += score * count
-                matched_keywords.extend([keyword] * count)
+        # --- Aho-Corasick Keyword Matching ---
+        for end_index, (keyword, score) in self.automaton.iter(text):
+            total_score += score
+            matched_keywords.append(keyword)
+        # --- End of Aho-Corasick Keyword Matching ---
         
         for pattern, score in self.regex_patterns.items():
             matches = re.findall(pattern, text)
@@ -240,6 +270,13 @@ class JudolDetector:
     
     def predict(self, text):
         """Predict if text contains judol content"""
+        # --- Caching Optimization ---
+        if self.cache_enabled:
+            cached_result = self.redis_conn.get(f"text:{text}")
+            if cached_result:
+                return json.loads(cached_result)
+        # --- End of Caching ---
+
         if self.model is None:
             self.load_model()
         
@@ -262,13 +299,18 @@ class JudolDetector:
         probability = self.model.predict_proba(X_combined)[0][1]
         is_judol = probability > self.threshold
         
-        return {
+        result = {
             'is_judol': bool(is_judol),
             'confidence': float(probability),
             'keyword_score': features['keyword_score'],
             'matched_keywords': matched_keywords,
             'features': features
         }
+        
+        if self.cache_enabled:
+            # Cache result for 1 hour
+            self.redis_conn.set(f"text:{text}", json.dumps(result), ex=3600)
+        return result
     
     def analyze_html_content(self, html_content):
         """Analyze HTML content and identify judol elements"""
@@ -286,6 +328,37 @@ class JudolDetector:
         # Analyze full content
         overall_result = self.predict(text_content)
         
+        # --- Start of Image Analysis ---
+        suspicious_images = []
+        img_tags = soup.find_all('img')
+        print(f"Found {len(img_tags)} image tags to analyze.")
+
+        for img in img_tags:
+            try:
+                img_url = img.get('src')
+                if not img_url or img_url.startswith('data:'):
+                    continue
+
+                # Make URL absolute
+                from urllib.parse import urljoin
+                # This part is tricky as we don't have the base URL here.
+                # This will be handled in the API server instead.
+
+                print(f"Analyzing image: {img_url}")
+                image_result = self.analyze_image_url(img_url)
+
+                if image_result['is_judol'] and image_result['confidence'] > 0.75:
+                    selector = self._generate_css_selector(img)
+                    suspicious_images.append({
+                        'selector': selector,
+                        'text': image_result['text'],
+                        'confidence': image_result['confidence'],
+                        'matched_keywords': image_result['matched_keywords']
+                    })
+            except Exception as e:
+                print(f"Could not analyze image {img.get('src')}: {e}")
+        # --- End of Image Analysis ---
+
         # Analyze individual elements
         suspicious_elements = []
         
@@ -347,12 +420,68 @@ class JudolDetector:
                     print(f"Error processing element: {e}")
                     continue
         
+        # Combine text and image results
+        all_suspicious_elements = suspicious_elements + suspicious_images
+
         return {
             'overall': overall_result,
-            'suspicious_elements': suspicious_elements,
-            'total_suspicious_elements': len(suspicious_elements)
+            'suspicious_elements': all_suspicious_elements,
+            'total_suspicious_elements': len(all_suspicious_elements)
         }
     
+    def analyze_image_url(self, image_url):
+        """Analyze an image from a URL for judol content using OCR."""
+        # --- Caching Optimization ---
+        if self.cache_enabled:
+            cached_result = self.redis_conn.get(f"image:{image_url}")
+            if cached_result:
+                return json.loads(cached_result)
+        # --- End of Caching ---
+        try:
+            # Download image
+            response = requests.get(image_url, stream=True, timeout=10)
+            response.raise_for_status()
+
+            # Read image from response
+            image_bytes = io.BytesIO(response.content)
+            image = Image.open(image_bytes)
+
+            # --- OCR Optimization ---
+            # 1. Skip small images that are unlikely to be ads
+            if image.width < 50 or image.height < 50:
+                # print(f"Skipping small image ({image.width}x{image.height}): {image_url}")
+                return {'is_judol': False, 'confidence': 0, 'text': ''}
+
+            # 2. Pre-process image for OCR: convert to grayscale
+            image = image.convert('L')
+            # --- End of Optimization ---
+
+            # Perform OCR
+            extracted_text = pytesseract.image_to_string(image, lang='ind')
+            print(f"Extracted text from image: {extracted_text[:100]}...")
+
+            if not extracted_text.strip():
+                return {'is_judol': False, 'confidence': 0, 'text': ''}
+
+            # Analyze extracted text
+            result = self.predict(extracted_text)
+            final_result = {
+                'is_judol': result['is_judol'],
+                'confidence': result['confidence'],
+                'text': extracted_text,
+                'matched_keywords': result['matched_keywords']
+            }
+            if self.cache_enabled:
+                # Cache result for 1 hour
+                self.redis_conn.set(f"image:{image_url}", json.dumps(final_result), ex=3600)
+            return final_result
+
+        except Exception as e:
+            print(f"Failed to process image URL {image_url}: {e}")
+            final_result = {'is_judol': False, 'confidence': 0, 'text': ''}
+            # Do not cache failure results permanently, but you could add a short-lived cache here if needed
+            return final_result
+
     def _is_structural_element(self, element):
         """Check if element is likely a structural/navigation element"""
         # Check tag attributes for structural indicators

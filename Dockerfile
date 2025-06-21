@@ -7,6 +7,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-ind \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better layer caching
