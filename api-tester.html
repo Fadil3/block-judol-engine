@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Judol Detection API Tester</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 20px;
+        background-color: #f4f4f4;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .test-section {
+        margin: 20px 0;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        background-color: #f9f9f9;
+      }
+      .result {
+        margin: 10px 0;
+        padding: 10px;
+        border-radius: 5px;
+        font-family: monospace;
+        white-space: pre-wrap;
+      }
+      .result.safe {
+        background-color: #e8f5e8;
+        border: 1px solid #4caf50;
+      }
+      .result.suspicious {
+        background-color: #ffe8e8;
+        border: 1px solid #f44336;
+      }
+      textarea {
+        width: 100%;
+        height: 100px;
+        margin: 10px 0;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      button {
+        background-color: #4caf50;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        margin: 5px;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+      button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+      }
+      .api-status {
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 5px;
+      }
+      .api-status.connected {
+        background-color: #e8f5e8;
+        border: 1px solid #4caf50;
+      }
+      .api-status.disconnected {
+        background-color: #ffe8e8;
+        border: 1px solid #f44336;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Judol Detection API Tester</h1>
+
+      <div class="test-section">
+        <h2>API Status</h2>
+        <div id="apiStatus" class="api-status">Checking...</div>
+        <button onclick="checkApiHealth()">Refresh Status</button>
+      </div>
+
+      <div class="test-section">
+        <h2>Test Text Analysis</h2>
+        <textarea
+          id="testText"
+          placeholder="Enter text to analyze for judol content..."
+        >
+Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga tercinta.</textarea
+        >
+        <br />
+        <button onclick="analyzeText()">Analyze Text</button>
+        <button onclick="loadSampleTexts()">Load Sample Texts</button>
+        <div id="textResult" class="result"></div>
+      </div>
+
+      <div class="test-section">
+        <h2>Test HTML Analysis</h2>
+        <textarea id="testHtml" placeholder="Enter HTML content to analyze...">
+&lt;div&gt;
+  &lt;p&gt;Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga tercinta.&lt;/p&gt;
+  &lt;p&gt;Daftar sekarang di slot88 gacor untuk bonus maxwin!&lt;/p&gt;
+&lt;/div&gt;
+        </textarea>
+        <br />
+        <button onclick="analyzeHtml()">Analyze HTML</button>
+        <div id="htmlResult" class="result"></div>
+      </div>
+
+      <div class="test-section">
+        <h2>Pre-defined Test Cases</h2>
+        <button onclick="testSafeContent()">Test Safe Content</button>
+        <button onclick="testSuspiciousContent()">
+          Test Suspicious Content
+        </button>
+        <button onclick="testMixedContent()">Test Mixed Content</button>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = "http://localhost:8000";
+
+      async function checkApiHealth() {
+        const statusDiv = document.getElementById("apiStatus");
+        statusDiv.textContent = "Checking...";
+        statusDiv.className = "api-status";
+
+        try {
+          const response = await fetch(`${API_BASE}/health`);
+          const data = await response.json();
+
+          if (data.status === "healthy") {
+            statusDiv.textContent = `✅ API is healthy\nModel loaded: ${data.model_loaded}\nKeywords loaded: ${data.total_keywords}`;
+            statusDiv.className = "api-status connected";
+          } else {
+            statusDiv.textContent = `❌ API is unhealthy\nError: ${
+              data.error || "Unknown error"
+            }`;
+            statusDiv.className = "api-status disconnected";
+          }
+        } catch (error) {
+          statusDiv.textContent = `❌ Cannot connect to API\nError: ${error.message}`;
+          statusDiv.className = "api-status disconnected";
+        }
+      }
+
+      async function analyzeText() {
+        const text = document.getElementById("testText").value;
+        const resultDiv = document.getElementById("textResult");
+
+        if (!text.trim()) {
+          resultDiv.textContent = "Please enter some text to analyze";
+          resultDiv.className = "result";
+          return;
+        }
+
+        resultDiv.textContent = "Analyzing...";
+        resultDiv.className = "result";
+
+        try {
+          const response = await fetch(`${API_BASE}/analyze`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ text: text }),
+          });
+
+          const data = await response.json();
+
+          resultDiv.textContent = JSON.stringify(data, null, 2);
+          resultDiv.className = `result ${
+            data.is_judol ? "suspicious" : "safe"
+          }`;
+        } catch (error) {
+          resultDiv.textContent = `Error: ${error.message}`;
+          resultDiv.className = "result suspicious";
+        }
+      }
+
+      async function analyzeHtml() {
+        const html = document.getElementById("testHtml").value;
+        const resultDiv = document.getElementById("htmlResult");
+
+        if (!html.trim()) {
+          resultDiv.textContent = "Please enter some HTML to analyze";
+          resultDiv.className = "result";
+          return;
+        }
+
+        resultDiv.textContent = "Analyzing...";
+        resultDiv.className = "result";
+
+        try {
+          const response = await fetch(`${API_BASE}/analyze-html`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ html_content: html }),
+          });
+
+          const data = await response.json();
+
+          resultDiv.textContent = JSON.stringify(data, null, 2);
+          resultDiv.className = `result ${
+            data.detected_elements.length > 0 ? "suspicious" : "safe"
+          }`;
+        } catch (error) {
+          resultDiv.textContent = `Error: ${error.message}`;
+          resultDiv.className = "result suspicious";
+        }
+      }
+
+      function loadSampleTexts() {
+        const samples = [
+          "Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga tercinta.",
+          "Daftar sekarang di slot88 gacor untuk bonus maxwin!",
+          "Tips bermain togel dan prediksi angka jitu hari ini.",
+          "Cara memasak rendang yang enak dan gurih.",
+          "Mainkan game seru dan menangkan hadiah menarik!",
+        ];
+
+        document.getElementById("testText").value =
+          samples[Math.floor(Math.random() * samples.length)];
+      }
+
+      async function testSafeContent() {
+        document.getElementById("testText").value =
+          "Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga tercinta. Belajar memasak adalah kegiatan yang menyenangkan untuk keluarga.";
+        await analyzeText();
+      }
+
+      async function testSuspiciousContent() {
+        document.getElementById("testText").value =
+          "Daftar sekarang di slot88 gacor untuk bonus maxwin! Dapatkan pola slot terbaik dan menangkan jutaan rupiah setiap hari.";
+        await analyzeText();
+      }
+
+      async function testMixedContent() {
+        document.getElementById("testText").value =
+          "Resep masakan Indonesia yang lezat. Namun, jangan lupa juga untuk bermain di situs slot gacor terpercaya untuk hiburan.";
+        await analyzeText();
+      }
+
+      // Check API status when page loads
+      window.addEventListener("load", checkApiHealth);
+    </script>
+  </body>
+</html>

@@ -246,21 +246,62 @@ class JudolDetector:
         suspicious_elements = []
         
         # Check specific elements that commonly contain judol content
-        elements_to_check = soup.find_all(['div', 'span', 'p', 'a', 'h1', 'h2', 'h3', 'title'])
+        # Prioritize elements that are more likely to contain meaningful content
+        elements_to_check = []
+        
+        # High priority elements (likely to contain suspicious content)
+        high_priority = soup.find_all(['h1', 'h2', 'h3', 'title', 'a'])
+        elements_to_check.extend(high_priority)
+        
+        # Medium priority elements (might contain suspicious content)
+        medium_priority = soup.find_all(['p', 'span', 'button'])
+        elements_to_check.extend(medium_priority)
+        
+        # Low priority elements (less likely but still check)
+        low_priority = soup.find_all(['div'])
+        # Limit div elements to avoid checking too many generic containers
+        elements_to_check.extend(low_priority[:50])  # Only check first 50 divs
+        
+        # Track processed text to avoid duplicates
+        processed_texts = set()
         
         for element in elements_to_check:
             element_text = element.get_text().strip()
-            if len(element_text) > 10:  # Only check elements with substantial text
-                result = self.predict(element_text)
-                if result['is_judol'] and result['confidence'] > 0.7:
-                    # Get element selector
-                    selector = self._generate_css_selector(element)
+            
+            # Skip if text is too short, too long, or already processed
+            if (len(element_text) < 15 or 
+                len(element_text) > 500 or 
+                element_text in processed_texts):
+                continue
+                
+            # Skip if element is likely to be navigation or structure
+            if self._is_structural_element(element):
+                continue
+                
+            processed_texts.add(element_text)
+            
+            result = self.predict(element_text)
+            
+            # Use a higher confidence threshold to reduce false positives
+            if result['is_judol'] and result['confidence'] > 0.8:
+                # Get element selector
+                selector = self._generate_css_selector(element)
+                
+                # Verify selector doesn't match too many elements
+                try:
+                    # Simple check: if selector contains only tag name, it's too generic
+                    if selector and not any(char in selector for char in ['.', '#', ':', '>']):
+                        continue
+                        
                     suspicious_elements.append({
                         'selector': selector,
                         'text': element_text[:100] + '...' if len(element_text) > 100 else element_text,
                         'confidence': result['confidence'],
                         'matched_keywords': result['matched_keywords']
                     })
+                except Exception as e:
+                    print(f"Error processing element: {e}")
+                    continue
         
         return {
             'overall': overall_result,
@@ -268,23 +309,74 @@ class JudolDetector:
             'total_suspicious_elements': len(suspicious_elements)
         }
     
+    def _is_structural_element(self, element):
+        """Check if element is likely a structural/navigation element"""
+        # Check tag attributes for structural indicators
+        element_class = ' '.join(element.get('class', [])).lower()
+        element_id = (element.get('id') or '').lower()
+        
+        structural_indicators = [
+            'nav', 'menu', 'header', 'footer', 'sidebar', 'breadcrumb',
+            'pagination', 'toolbar', 'status', 'loading', 'modal'
+        ]
+        
+        return any(indicator in element_class or indicator in element_id 
+                  for indicator in structural_indicators)
+    
     def _generate_css_selector(self, element):
-        """Generate CSS selector for an element"""
-        selector_parts = []
-        
-        # Add tag name
-        selector_parts.append(element.name)
-        
-        # Add ID if available
+        """Generate a specific CSS selector for an element"""
+        # If element has an ID, use it as it should be unique
         if element.get('id'):
-            selector_parts.append(f"#{element.get('id')}")
+            return f"#{element.get('id')}"
         
-        # Add classes if available
+        # Build a more specific selector by traversing up the DOM
+        selector_parts = []
+        current = element
+        
+        # Go up the DOM tree to create a specific path
+        path_parts = []
+        for _ in range(5):  # Limit depth to avoid overly long selectors
+            if current is None or current.name is None:
+                break
+                
+            part = current.name
+            
+            # Add class information if available
+            if current.get('class') and len(current.get('class')) > 0:
+                # Use first class to avoid overly complex selectors
+                first_class = current.get('class')[0]
+                part += f".{first_class}"
+            
+            # Add nth-child if there are siblings of the same type
+            if current.parent:
+                siblings = [sibling for sibling in current.parent.children 
+                           if hasattr(sibling, 'name') and sibling.name == current.name]
+                if len(siblings) > 1:
+                    try:
+                        index = siblings.index(current) + 1
+                        part += f":nth-child({index})"
+                    except ValueError:
+                        pass
+            
+            path_parts.append(part)
+            current = current.parent
+            
+            # Stop if we reach body or html
+            if current and current.name in ['body', 'html']:
+                break
+        
+        # Reverse to get top-down path and join with descendant combinator
+        if path_parts:
+            path_parts.reverse()
+            return ' > '.join(path_parts)
+        
+        # Fallback: use tag name with classes
+        selector = element.name
         if element.get('class'):
-            classes = '.'.join(element.get('class'))
-            selector_parts.append(f".{classes}")
+            classes = '.'.join(element.get('class')[:2])  # Limit to first 2 classes
+            selector += f".{classes}"
         
-        return ''.join(selector_parts)
+        return selector
     
     def save_model(self):
         """Save the trained model and vectorizer"""

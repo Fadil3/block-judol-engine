@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Page for Judol Detection</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        line-height: 1.6;
+      }
+      .content-section {
+        margin: 20px 0;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      h2 {
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Test Page for Judol Content Detection</h1>
+
+    <div class="content-section">
+      <h2>Safe Content</h2>
+      <p>
+        This is normal content about cooking recipes and programming tutorials.
+        Nothing suspicious here.
+      </p>
+      <p>
+        Learn how to cook delicious Indonesian food with these simple recipes.
+      </p>
+    </div>
+
+    <div class="content-section" id="gambling-content">
+      <h2>Slot Gacor Maxwin!</h2>
+      <p>
+        Slot gacor hari ini dengan RTP tertinggi! Daftar sekarang dan dapatkan
+        bonus 100% deposit pertama.
+      </p>
+      <p>
+        Anti rungkad, pasti maxwin! Slot pragmatic play dengan winrate tinggi.
+      </p>
+    </div>
+
+    <div class="content-section">
+      <h2>More Safe Content</h2>
+      <p>Here's some information about technology and science.</p>
+      <p>Python programming is great for data analysis and web development.</p>
+    </div>
+
+    <div class="content-section" id="more-gambling">
+      <h2>Judi Online Terpercaya</h2>
+      <p>
+        Situs judi online terpercaya dengan deposit minimal 10rb. Bonus new
+        member 200%!
+      </p>
+      <p>
+        Togel, casino, sportsbook - semua ada di sini. Daftar sekarang juga!
+      </p>
+    </div>
+
+    <div class="content-section">
+      <h2>Educational Content</h2>
+      <p>
+        This section contains educational material about web development and
+        software engineering.
+      </p>
+      <p>Always remember to follow best practices when coding.</p>
+    </div>
+
+    <script>
+      console.log(
+        "Test page loaded. Extension should detect gambling content in sections 2 and 4."
+      );
+
+      // Add some dynamic content that might be analyzed
+      setTimeout(() => {
+        const dynamicDiv = document.createElement("div");
+        dynamicDiv.className = "content-section";
+        dynamicDiv.innerHTML = `
+                <h2>Dynamic Gambling Content</h2>
+                <p>Bonus deposit 500% untuk member baru! Slot online terpercaya dengan jackpot besar.</p>
+                <p>Main sekarang dan menang jutaan rupiah!</p>
+            `;
+        document.body.appendChild(dynamicDiv);
+      }, 2000);
+    </script>
+  </body>
+</html>

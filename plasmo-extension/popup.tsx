@@ -121,6 +121,18 @@ function IndexPopup() {
     setSettings(newSettings)
     await storage.set(key, value)
 
+    // Send updated settings to content script
+    if (currentTab) {
+      try {
+        await chrome.tabs.sendMessage(currentTab.id, {
+          action: "updateSettings",
+          settings: newSettings
+        })
+      } catch (error) {
+        console.log("Could not send settings to content script:", error)
+      }
+    }
+
     if (key === "enabled" && !value && currentTab) {
       chrome.tabs.reload(currentTab.id)
     }
