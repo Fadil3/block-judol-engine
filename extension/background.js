@@ -62,6 +62,69 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "updateBadge") {
     updateBadge(sender.tab.id, request.data);
   }
+
+  if (request.type === "analyze_html_and_images") {
+    // New endpoint for combined analysis
+    fetch("http://localhost:8000/analyze/html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        html: request.html,
+        images: request.images,
+        url: request.url,
+      }),
+    })
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`HTTP error! status: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        chrome.tabs.query(
+          { active: true, currentWindow: true },
+          function (tabs) {
+            if (tabs[0]) {
+              chrome.tabs.sendMessage(tabs[0].id, {
+                type: "analysis_result",
+                data: data,
+              });
+            }
+          }
+        );
+      })
+      .catch((error) => console.error("Error in combined analysis:", error));
+  } else if (request.type === "analyze_images_and_text") {
+    fetch("http://localhost:8000/analyze/html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        html: request.html,
+        image_urls: request.image_urls,
+        url: request.url,
+      }),
+    })
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`HTTP error! status: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        chrome.tabs.query(
+          { active: true, currentWindow: true },
+          function (tabs) {
+            if (tabs[0] && tabs[0].id) {
+              chrome.tabs.sendMessage(tabs[0].id, {
+                type: "analysis_result",
+                data: data,
+              });
+            }
+          }
+        );
+      })
+      .catch((error) => console.error("Error in combined analysis:", error));
+  }
+
+  return true; // Indicates that the response is sent asynchronously
 });
 
 // Analyze content using the API

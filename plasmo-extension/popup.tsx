@@ -11,21 +11,29 @@ interface Settings {
   showNotifications: boolean
 }
 
-interface AnalysisResults {
-  overall: {
-    is_judol: boolean
-    confidence: number
-    matched_keywords: string[]
-  }
-  total_suspicious_elements: number
+// --- NEW Interfaces to match backend ---
+interface AnalysisDetail {
+  matched_keywords?: string[]
+  keyword_score?: number
+  regex_score?: number
 }
+
+interface AnalysisResult {
+  is_gambling: boolean
+  confidence: number
+  selector: string
+  type: "text" | "image_url"
+  details: AnalysisDetail
+}
+// --- END NEW Interfaces ---
 
 const storage = new Storage()
 
 function IndexPopup() {
   const [currentTab, setCurrentTab] = useState<chrome.tabs.Tab | null>(null)
-  const [analysisResults, setAnalysisResults] =
-    useState<AnalysisResults | null>(null)
+  const [analysisResults, setAnalysisResults] = useState<
+    AnalysisResult[] | null
+  >(null)
   const [settings, setSettings] = useState<Settings>({
     enabled: true,
     threshold: 0.5,
@@ -106,8 +114,8 @@ function IndexPopup() {
         action: "getAnalysisResults"
       })
 
-      if (response && response.results) {
-        setAnalysisResults(response.results)
+      if (response) {
+        setAnalysisResults(response)
       }
     } catch (error) {
       console.log("No content script response:", error)
@@ -164,28 +172,55 @@ function IndexPopup() {
   }
 
   const getStatusInfo = () => {
-    if (!analysisResults || !analysisResults.overall.is_judol) {
+    // 1. Handle initial or empty states
+    if (!analysisResults || analysisResults.length === 0) {
       return {
         className: "safe",
         text: "Page is safe",
-        stats: "No suspicious gambling content detected"
+        stats: "No suspicious content detected"
       }
     }
 
-    const confidence = analysisResults.overall.confidence
-    const suspiciousCount = analysisResults.total_suspicious_elements
+    // 2. Filter for items that are actually above the set threshold
+    const suspiciousItems = analysisResults.filter(
+      (r) => r.confidence >= settings.threshold
+    )
 
+    // 3. If no items meet the threshold, the page is considered safe
+    if (suspiciousItems.length === 0) {
+      return {
+        className: "safe",
+        text: "Page is safe",
+        stats: "No suspicious content detected"
+      }
+    }
+
+    // 4. If we have suspicious items, find the most severe one
+    const topResult = suspiciousItems.reduce(
+      (max, item) => (item.confidence > max.confidence ? item : max),
+      suspiciousItems[0]
+    )
+
+    const confidence = topResult.confidence
+    const suspiciousCount = suspiciousItems.length
+    const keywords = [
+      ...new Set(
+        suspiciousItems.flatMap((r) => r.details.matched_keywords || [])
+      )
+    ]
+
+    // 5. Determine the warning level based on the highest confidence score
     if (confidence > 0.8) {
       return {
         className: "danger",
         text: "High risk content detected",
-        stats: `Confidence: ${Math.round(confidence * 100)}%\nSuspicious elements: ${suspiciousCount}\nKeywords found: ${analysisResults.overall.matched_keywords.length}`
+        stats: `Confidence: ${Math.round(confidence * 100)}% | Suspicious: ${suspiciousCount} | Keywords: ${keywords.slice(0, 3).join(", ")}`
       }
     } else {
       return {
         className: "warning",
         text: "Potentially suspicious content",
-        stats: `Confidence: ${Math.round(confidence * 100)}%\nSuspicious elements: ${suspiciousCount}\nKeywords found: ${analysisResults.overall.matched_keywords.length}`
+        stats: `Confidence: ${Math.round(confidence * 100)}% | Suspicious: ${suspiciousCount} | Keywords: ${keywords.slice(0, 3).join(", ")}`
       }
     }
   }
@@ -216,7 +251,9 @@ function IndexPopup() {
             <div className={`status-dot ${statusInfo.className}`}></div>
             <div className="status-text">{statusInfo.text}</div>
           </div>
-          <div className="stats">{statusInfo.stats}</div>
+          <div className="stats" title={statusInfo.stats}>
+            {statusInfo.stats}
+          </div>
         </div>
 
         <div className="controls-section">

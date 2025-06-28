@@ -88,17 +88,7 @@ function applySuspiciousElementBlocking() {
       const domElements = document.querySelectorAll(element.selector);
 
       domElements.forEach((domElement) => {
-        switch (settings.blockingMode) {
-          case "highlight":
-            highlightElement(domElement, element);
-            break;
-          case "blur":
-            blurElement(domElement);
-            break;
-          case "hide":
-            hideElement(domElement);
-            break;
-        }
+        applyAction(domElement, element);
       });
     } catch (error) {
       console.error(
@@ -106,6 +96,20 @@ function applySuspiciousElementBlocking() {
         element.selector,
         error
       );
+    }
+  });
+}
+
+function applyAction(domElement, itemData) {
+  chrome.storage.local.get("blocking_mode", (result) => {
+    const mode = result.blocking_mode || "blur"; // Default to blur
+    switch (mode) {
+      case "blur":
+        blurElement(domElement, itemData); // Pass the DOM element and the data
+        break;
+      case "hide":
+        hideElement(domElement);
+        break;
     }
   });
 }
@@ -138,21 +142,72 @@ function highlightElement(element, data) {
 }
 
 // Blur suspicious element
-function blurElement(element) {
-  element.classList.add("judol-blurred");
+function blurElement(element, item) {
+  if (!element) return;
 
-  // Add click to reveal
-  const overlay = document.createElement("div");
-  overlay.className = "judol-blur-overlay";
-  overlay.innerHTML =
-    "<span>Click to reveal potentially suspicious content</span>";
+  const wrapper = document.createElement("div");
+  wrapper.className = "judol-overlay-wrapper";
 
-  element.style.position = "relative";
-  element.appendChild(overlay);
+  // Get the position and size of the element
+  const rect = element.getBoundingClientRect();
 
-  overlay.addEventListener("click", () => {
-    element.classList.remove("judol-blurred");
-    overlay.remove();
+  // Adjust for scroll position
+  wrapper.style.top = `${rect.top + window.scrollY}px`;
+  wrapper.style.left = `${rect.left + window.scrollX}px`;
+  wrapper.style.width = `${rect.width}px`;
+  wrapper.style.height = `${rect.height}px`;
+
+  document.body.appendChild(wrapper);
+
+  // --- NEW: Handle sub-region blurring ---
+  if (item.regions && item.image_size) {
+    // This is an image with specific regions to blur
+    const parentImageRect = element.getBoundingClientRect();
+    const scaleX = parentImageRect.width / item.image_size.w;
+    const scaleY = parentImageRect.height / item.image_size.h;
+
+    item.regions.forEach((region) => {
+      const regionBox = region.box_px; // [x, y, w, h]
+      const overlay = document.createElement("div");
+      overlay.className = "judol-blur-overlay";
+
+      overlay.style.left = `${regionBox[0] * scaleX}px`;
+      overlay.style.top = `${regionBox[1] * scaleY}px`;
+      overlay.style.width = `${regionBox[2] * scaleX}px`;
+      overlay.style.height = `${regionBox[3] * scaleY}px`;
+
+      wrapper.appendChild(overlay);
+    });
+  } else {
+    // This is a text element or a full-image blur, apply a single overlay
+    const overlay = document.createElement("div");
+    overlay.className = "judol-blur-overlay judol-full-blur";
+    wrapper.appendChild(overlay);
+  }
+  // --- END NEW ---
+
+  // Create and append the info box
+  const infoBox = document.createElement("div");
+  infoBox.className = "judol-info-box";
+  // Note: For multi-region, confidence/keywords of the first region is shown.
+  // A more advanced UI could show details for each region on hover.
+  const representativeConfidence =
+    item.confidence || (item.regions && item.regions[0].confidence) || 0;
+  const representativeKeywords =
+    item.matched_keywords ||
+    (item.regions && item.regions[0].matched_keywords) ||
+    [];
+  infoBox.innerHTML = `
+    <strong>Suspicious Content Detected</strong><br>
+    Confidence: ${(representativeConfidence * 100).toFixed(1)}%<br>
+    Keywords: ${representativeKeywords.join(", ")}
+  `;
+
+  wrapper.appendChild(infoBox);
+
+  // Add click to reveal for the whole wrapper
+  wrapper.addEventListener("click", () => {
+    wrapper.remove();
   });
 }
 
@@ -296,5 +351,148 @@ function removeAllEffects() {
   if (warning) warning.remove();
 }
 
-// Initialize when script loads
-init();
+function getVisibleElementsAndAnalyze() {
+  console.log("Judol Protector: Analyzing page content...");
+  const backendImageBatch = [];
+  const minSize = 50; // 50x50 pixels
+
+  // --- NEW: Client-side instant keyword detection ---
+  const instantBlockKeywords = [
+    "judi",
+    "slot",
+    "gacor",
+    "toto",
+    "bet",
+    "casino",
+    "spin",
+    "togel",
+  ];
+
+  document.querySelectorAll("img").forEach((img) => {
+    const rect = img.getBoundingClientRect();
+    if (rect.width > minSize && rect.height > minSize && img.src) {
+      const lowercasedSrc = img.src.toLowerCase();
+      const matchedKeyword = instantBlockKeywords.find((keyword) =>
+        lowercasedSrc.includes(keyword)
+      );
+
+      if (matchedKeyword) {
+        // INSTANTLY blur if a keyword is found in the URL
+        console.log(
+          `Judol Protector: Instantly blurring image with keyword '${matchedKeyword}' in URL:`,
+          img.src
+        );
+        applyAction(img, {
+          type: "image",
+          selector: img.src,
+          regions: [
+            {
+              box_px: [0, 0, rect.width, rect.height],
+              confidence: 0.99,
+              matched_keywords: [matchedKeyword],
+            },
+          ],
+          image_size: { w: rect.width, h: rect.height },
+        });
+      } else {
+        // If no instant match, add to the batch for backend analysis
+        if (!backendImageBatch.some((item) => item.url === img.src)) {
+          backendImageBatch.push(img.src);
+        }
+      }
+    }
+  });
+
+  // Send the remaining images to the backend if there are any
+  if (backendImageBatch.length > 0) {
+    console.log(
+      `Judol Protector: Sending ${backendImageBatch.length} images for backend analysis.`
+    );
+    chrome.runtime.sendMessage({
+      type: "analyze_images_and_text",
+      html: document.body.innerHTML,
+      image_urls: backendImageBatch,
+      url: window.location.href,
+    });
+  }
+}
+
+function initialize() {
+  // Analyze on initial load
+  getVisibleElementsAndAnalyze();
+
+  // Re-analyze on DOM changes
+  const observer = new MutationObserver(
+    debounce(getVisibleElementsAndAnalyze, 500)
+  );
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+// --- Main execution ---
+// Use a timeout to ensure the page has had time to render dynamic content
+setTimeout(initialize, 1000);
+
+chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+  if (request.type === "analysis_result") {
+    console.log("Judol Protector: Received analysis result:", request.data);
+    const data = request.data;
+    if (data && data.suspicious_elements) {
+      updatePopup(data);
+
+      // --- NEW: Filter and Poll for Elements ---
+      const confidenceThreshold = 0.5;
+      let pendingItems = data.suspicious_elements.filter((item) => {
+        // Filter by type and confidence score
+        if (
+          item.type !== "image" ||
+          !item.regions ||
+          item.regions.length === 0
+        ) {
+          return false;
+        }
+        // Check the confidence of the most confident region
+        const maxConfidence = Math.max(
+          ...item.regions.map((r) => r.confidence)
+        );
+        return maxConfidence >= confidenceThreshold;
+      });
+
+      if (pendingItems.length === 0) {
+        console.log("Judol Protector: No items above confidence threshold.");
+        return;
+      }
+
+      let attempts = 0;
+      const maxAttempts = 20; // 20 attempts * 500ms = 10 seconds
+
+      const poller = setInterval(() => {
+        attempts++;
+        pendingItems = pendingItems.filter((item) => {
+          // Use "starts with" selector for resilience
+          const elements = document.querySelectorAll(
+            `img[src^="${item.selector}"]`
+          );
+          if (elements.length > 0) {
+            console.log(
+              `Judol Protector: Found and blurring ${elements.length} element(s) for`,
+              item.selector
+            );
+            elements.forEach((domElement) => applyAction(domElement, item));
+            return false; // Remove from pending list
+          }
+          return true; // Keep in pending list
+        });
+
+        if (pendingItems.length === 0 || attempts >= maxAttempts) {
+          clearInterval(poller);
+          if (pendingItems.length > 0) {
+            console.log(
+              "Judol Protector: Timed out waiting for elements:",
+              pendingItems.map((i) => i.selector)
+            );
+          }
+        }
+      }, 500);
+    }
+  }
+});

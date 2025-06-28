@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 import uvicorn
 from judol_detector import JudolDetector
 import logging
@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Judol Detection API",
-    description="API for detecting online gambling (judol) content",
-    version="1.0.0"
+    description="API for detecting online gambling (judol) content based on keywords.",
+    version="1.1.0"
 )
 
 # Configure CORS
@@ -28,122 +28,70 @@ app.add_middleware(
 # Initialize detector
 detector = JudolDetector()
 
-# Pydantic models
-class TextRequest(BaseModel):
-    text: str
-    threshold: Optional[float] = 0.5
+# --- New Pydantic Models for Simplified API ---
 
-class HTMLRequest(BaseModel):
+class AnalysisDetail(BaseModel):
+    matched_keywords: Optional[List[str]] = None
+    keyword_score: Optional[float] = None
+    regex_score: Optional[float] = None
+
+class AnalysisResult(BaseModel):
+    is_gambling: bool
+    confidence: float
+    selector: str
+    type: str # 'text' or 'image_url'
+    details: AnalysisDetail
+
+class HTMLAnalysisRequest(BaseModel):
     html: str
     url: Optional[str] = None
-    threshold: Optional[float] = 0.5
+    image_urls: Optional[List[str]] = None
 
-class PredictionResponse(BaseModel):
-    is_judol: bool
-    confidence: float
-    keyword_score: int
-    matched_keywords: List[str]
-    features: dict
-
-class SuspiciousElement(BaseModel):
-    selector: str
-    text: str
-    confidence: float
-    matched_keywords: List[str]
-
-class HTMLAnalysisResponse(BaseModel):
-    overall: PredictionResponse
-    suspicious_elements: List[SuspiciousElement]
-    total_suspicious_elements: int
-    url: Optional[str] = None
-
-@app.on_event("startup")
-async def startup_event():
-    """Load the model on startup"""
-    try:
-        detector.load_model()
-        logger.info("Model loaded successfully!")
-    except FileNotFoundError:
-        logger.warning("Model not found. Training new model...")
-        detector.train_model()
-        logger.info("New model trained and ready!")
+# --- End of Pydantic Models ---
 
 @app.get("/")
 async def root():
     """Health check endpoint"""
     return {
-        "message": "Judol Detection API is running",
+        "message": "Judol Keyword Detection API is running",
         "status": "healthy",
-        "version": "1.0.0"
+        "version": "1.1.0"
     }
 
-@app.post("/predict/text", response_model=PredictionResponse)
-async def predict_text(request: TextRequest):
-    """Predict if text contains judol content"""
+@app.post("/analyze/html", response_model=List[AnalysisResult])
+async def analyze_html(request: HTMLAnalysisRequest):
+    """Analyze HTML content for judol content based on text and image URLs."""
     try:
-        # Update threshold if provided
-        original_threshold = detector.threshold
-        detector.threshold = request.threshold
-        
-        result = detector.predict(request.text)
-        
-        # Restore original threshold
-        detector.threshold = original_threshold
-        
-        return PredictionResponse(**result)
-    
+        # Pass the pre-filtered image list to the detector
+        results = detector.analyze_html_content(
+            html_content=request.html, 
+            base_url=request.url,
+            image_urls=request.image_urls
+        )
+        return results
     except Exception as e:
-        logger.error(f"Error predicting text: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
-
-@app.post("/analyze/html", response_model=HTMLAnalysisResponse)
-async def analyze_html(request: HTMLRequest):
-    """Analyze HTML content for judol elements"""
-    try:
-        # Update threshold if provided
-        original_threshold = detector.threshold
-        detector.threshold = request.threshold
-        
-        result = detector.analyze_html_content(request.html)
-        
-        # Restore original threshold
-        detector.threshold = original_threshold
-        
-        # Format response
-        response_data = {
-            "overall": result["overall"],
-            "suspicious_elements": result["suspicious_elements"],
-            "total_suspicious_elements": result["total_suspicious_elements"],
-            "url": request.url
-        }
-        
-        return HTMLAnalysisResponse(**response_data)
-    
-    except Exception as e:
-        logger.error(f"Error analyzing HTML: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+        logger.error(f"Error analyzing HTML: {e}", exc_info=True)
+        # Re-raise as HTTPException to be handled by FastAPI
+        raise HTTPException(status_code=500, detail=f"HTML analysis error: {str(e)}")
 
 @app.get("/keywords")
 async def get_keywords():
-    """Get all keywords and their scores"""
+    """Get all keywords and regex patterns"""
     return {
-        "keywords": detector.keywords_dict,
-        "total_keywords": len(detector.keywords_dict)
+        "keywords": detector.keywords,
+        "regex_patterns": detector.regex_patterns
     }
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
     try:
-        # Test prediction
-        test_result = detector.predict("test")
-        
+        keywords_ok = isinstance(detector.keywords, list) and len(detector.keywords) > 0
         return {
             "status": "healthy",
-            "model_loaded": detector.model is not None,
-            "keywords_loaded": len(detector.keywords_dict) > 0,
-            "total_keywords": len(detector.keywords_dict),
-            "test_prediction": test_result is not None
+            "keywords_loaded": keywords_ok,
+            "total_keywords": len(detector.keywords),
+            "total_regex": len(detector.regex_patterns)
         }
     except Exception as e:
         return {

@@ -15,12 +15,7 @@ pip install -r requirements.txt
 
 # Download NLTK data
 echo "📝 Downloading NLTK data..."
-python -c "
-import nltk
-nltk.download('punkt')
-nltk.download('stopwords')
-print('NLTK data downloaded successfully!')
-"
+python -m nltk.downloader -d /home/appuser/nltk_data punkt stopwords
 
 # Train the model
 echo "🤖 Training the ML model..."
@@ -42,3 +37,5 @@ echo "   3. Click 'Load unpacked' and select the 'extension' folder"
 echo ""
 echo "📡 API will be available at: http://localhost:8000"
 echo "📖 API docs will be available at: http://localhost:8000/docs"
+
+exec uvicorn api_server:app --host 0.0.0.0 --port 8000 --reload

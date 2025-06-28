@@ -1,0 +1,167 @@
+{
+  "version": "1.0",
+  "hash_threshold": 5,
+  "hashes": [
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-38.png",
+      "phash": "cadab3e4b5f40213",
+      "dhash": "19b1f1b171d103db",
+      "ahash": "fddd181839f8f90b",
+      "file_size": 85449
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-29-56.png",
+      "phash": "d00f23683edd2f91",
+      "dhash": "e1e8e0f0b08a88c8",
+      "ahash": "007c7efefec07e04",
+      "file_size": 138355
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-27-44.png",
+      "phash": "f46323947a2784e7",
+      "dhash": "0406668720242693",
+      "ahash": "c0e0f3c0dcfef2c0",
+      "file_size": 112707
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-32.png",
+      "phash": "abed5e5c0cc24ce2",
+      "dhash": "2347cbcb2b63cd2b",
+      "ahash": "9181e3e30300ef07",
+      "file_size": 67595
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-44.png",
+      "phash": "9a157b3be6d290c4",
+      "dhash": "1938fc7d6f1919c9",
+      "ahash": "0c0e7e3f3f0f0d2d",
+      "file_size": 82805
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-12.png",
+      "phash": "85097ee82ecfcb30",
+      "dhash": "70f2f0e0b4f0e0e0",
+      "ahash": "00187e3e7fff3c00",
+      "file_size": 86912
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-18.png",
+      "phash": "e3d0586d29de6692",
+      "dhash": "ccdcccdace4e282d",
+      "ahash": "606c64efe7a29c00",
+      "file_size": 88872
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-24-50.png",
+      "phash": "d17b6cac74d09a0b",
+      "dhash": "3303d99852b99494",
+      "ahash": "c181eceebbff7e00",
+      "file_size": 605606
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-27.png",
+      "phash": "b42b0376fac8cb0b",
+      "dhash": "f6d6f6363624d6f6",
+      "ahash": "03031bd7c7870602",
+      "file_size": 73407
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-33.png",
+      "phash": "a13f023c67c26cdb",
+      "dhash": "333b5a4a5a9adac6",
+      "ahash": "030b8be32b437f63",
+      "file_size": 70296
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-09.png",
+      "phash": "9ed456310c2a6f97",
+      "dhash": "28bceba3b29b1923",
+      "ahash": "001e313f1f010f11",
+      "file_size": 80435
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-00.png",
+      "phash": "906a6f172bf32ec0",
+      "dhash": "dbb4b5b8b8bc9cbc",
+      "ahash": "0010de4e1e1efe0e",
+      "file_size": 206690
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-26.png",
+      "phash": "84f3227a311d3fc3",
+      "dhash": "988af2d2a635f4d4",
+      "ahash": "0f7f1b1ade103f07",
+      "file_size": 103214
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-44.png",
+      "phash": "af533c144ab8daac",
+      "dhash": "074e5a4b425a0f0f",
+      "ahash": "80a22f2b3b3f83c3",
+      "file_size": 73351
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-37.png",
+      "phash": "d9ec0ef20cd838dc",
+      "dhash": "0000020000080000",
+      "ahash": "f0e0f8f8f8e8f8f8",
+      "file_size": 56729
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-53.png",
+      "phash": "958e14d84ba79769",
+      "dhash": "30b45c5593949418",
+      "ahash": "181f2f27d8eec600",
+      "file_size": 53671
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-29-50.png",
+      "phash": "803c07ebd7633867",
+      "dhash": "e6e6b392b293c8cc",
+      "ahash": "001f59feff59607c",
+      "file_size": 149407
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-27-38.png",
+      "phash": "fc522d035aad03fc",
+      "dhash": "4d2c36162f571626",
+      "ahash": "0080fed08027dfc3",
+      "file_size": 113595
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-19.png",
+      "phash": "85922e6bd894b5cb",
+      "dhash": "b949eeb2b2d64b27",
+      "ahash": "00007fffff220000",
+      "file_size": 73387
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-30-14.png",
+      "phash": "ff2e334b85854a85",
+      "dhash": "4929260688012a2a",
+      "ahash": "80c0f2f2f8d0e0e6",
+      "file_size": 70204
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-48.png",
+      "phash": "a1a70e087735d8fc",
+      "dhash": "6feb9a9e93b3f276",
+      "ahash": "0303ebc3c3590303",
+      "file_size": 75420
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-28-53.png",
+      "phash": "d53d218e25c398f3",
+      "dhash": "f616320e26f0c486",
+      "ahash": "0282dee2f63e7602",
+      "file_size": 82683
+    },
+    {
+      "filename": "Screenshot from 2025-06-25 21-27-50.png",
+      "phash": "c9c978c086a5fdb8",
+      "dhash": "90901aeae9a13270",
+      "ahash": "48c8fb3f7ffc0000",
+      "file_size": 155395
+    }
+  ]
+}

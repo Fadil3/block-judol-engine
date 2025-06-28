@@ -47,19 +47,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "analyzeContent") {
-    analyzeContent(request.data)
-      .then((result) => {
+    // Use an immediately-invoked async function to handle the promise
+    ;(async () => {
+      try {
+        const result = await analyzeContent(request.data)
         sendResponse({ success: true, data: result })
-      })
-      .catch((error) => {
-        console.error("Analysis failed:", error)
+      } catch (error) {
+        console.error("Analysis failed in background script:", error)
         sendResponse({ success: false, error: error.message })
-      })
-    return true // Keep the message channel open for async response
+      }
+    })()
+    return true // Keep the message channel open for the async response
   }
 
   if (request.action === "showNotification") {
     showNotification(request.data)
+    // No async response needed, so we don't return true
   }
 })
 
@@ -76,6 +79,7 @@ async function analyzeContent(pageData) {
       body: JSON.stringify({
         html: pageData.html,
         url: pageData.url,
+        image_urls: pageData.image_urls,
         threshold: 0.5
       })
     })

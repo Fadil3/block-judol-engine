@@ -14,25 +14,26 @@ interface Settings {
   showNotifications: boolean
 }
 
-interface AnalysisResults {
-  overall: {
-    is_judol: boolean
-    confidence: number
-    matched_keywords: string[]
-  }
-  total_suspicious_elements: number
-  suspicious_elements?: Array<{
-    selector: string
-    text: string
-    confidence: number
-    matched_keywords: string[]
-  }>
+// --- NEW Interfaces to match backend ---
+interface AnalysisDetail {
+  matched_keywords?: string[]
+  keyword_score?: number
+  regex_score?: number
 }
+
+interface AnalysisResult {
+  is_gambling: boolean
+  confidence: number
+  selector: string
+  type: "text" | "image_url"
+  details: AnalysisDetail
+}
+// --- END NEW Interfaces ---
 
 const storage = new Storage()
 
 let isAnalyzing = false
-let analysisResults: AnalysisResults | null = null
+let analysisResults: AnalysisResult[] | null = null
 let settings: Settings = {
   enabled: true,
   threshold: 0.5,
@@ -149,11 +150,15 @@ async function startAnalysis() {
   isAnalyzing = true
 
   try {
+    const images = Array.from(document.querySelectorAll("img"))
+    const imageUrls = images.map((img) => img.src).filter(Boolean)
+
     // Get page content
     const pageData = {
       html: document.documentElement.outerHTML,
       url: window.location.href,
-      title: document.title
+      title: document.title,
+      image_urls: imageUrls
     }
 
     // Send to background script for analysis
@@ -171,7 +176,7 @@ async function startAnalysis() {
     )
     if (response?.success) {
       analysisResults = response.data
-      processAnalysisResults()
+      processAnalysisResults(analysisResults)
     } else {
       console.error("Analysis failed:", response?.error)
     }
@@ -183,37 +188,41 @@ async function startAnalysis() {
 }
 
 // Process analysis results
-function processAnalysisResults() {
-  console.log("Judol Detector: Processing analysis results:", analysisResults)
+function processAnalysisResults(results: AnalysisResult[]) {
+  console.log("Judol Detector: Processing analysis results:", results)
 
   // Start observing for future DOM changes
   observeDynamicContent()
 
-  if (!analysisResults || !analysisResults.overall.is_judol) {
+  if (!results || results.length === 0) {
     console.log(
       "Judol Detector: No suspicious content found or analysis results are missing."
     )
     return
   }
 
-  const confidence = analysisResults.overall.confidence
-  const threshold = settings.threshold
-  console.log(
-    `Judol Detector: Overall confidence: ${confidence}, Threshold: ${threshold}`
+  // Find the highest confidence score from all results
+  const maxConfidence = results.reduce(
+    (max, item) => Math.max(max, item.confidence),
+    0
   )
 
-  if (confidence >= threshold) {
+  console.log(
+    `Judol Detector: Max confidence: ${maxConfidence}, Threshold: ${settings.threshold}`
+  )
+
+  if (maxConfidence >= settings.threshold) {
     console.log(
       "Judol Detector: Confidence is above threshold. Applying blocking mode:",
       settings.blockingMode
     )
-    // Apply blocking based on mode
+    // Apply blocking based on mode, passing the results to each function
     if (settings.blockingMode === "highlight") {
-      highlightSuspiciousContent()
+      highlightSuspiciousContent(results)
     } else if (settings.blockingMode === "blur") {
-      blurSuspiciousContent()
+      blurSuspiciousContent(results)
     } else if (settings.blockingMode === "hide") {
-      hideSuspiciousContent()
+      hideSuspiciousContent(results)
     }
 
     // Show notification if enabled
@@ -221,7 +230,9 @@ function processAnalysisResults() {
       sendMessage({
         action: "showNotification",
         data: {
-          message: `Suspicious gambling content detected (${Math.round(confidence * 100)}% confidence)`
+          message: `Suspicious gambling content detected (${Math.round(
+            maxConfidence * 100
+          )}% confidence)`
         }
       })
     }
@@ -229,14 +240,14 @@ function processAnalysisResults() {
 }
 
 // Highlight suspicious content
-function highlightSuspiciousContent() {
+function highlightSuspiciousContent(results: AnalysisResult[]) {
   console.log("Judol Detector: Highlighting suspicious content.")
-  if (!analysisResults?.suspicious_elements) {
+  if (!results) {
     console.log("Judol Detector: No suspicious elements to highlight.")
     return
   }
 
-  analysisResults.suspicious_elements.forEach((element) => {
+  results.forEach((element) => {
     console.log(`Judol Detector: Checking element for highlighting:`, element)
     if (element.confidence >= settings.threshold) {
       try {
@@ -253,42 +264,24 @@ function highlightSuspiciousContent() {
           return
         }
 
-        domElements.forEach((domElement) => {
-          const htmlElement = domElement as HTMLElement
-
-          // Skip if element is already highlighted or if it's a critical page element
-          if (
-            htmlElement.hasAttribute("data-judol-highlighted") ||
-            isPageStructureElement(htmlElement)
-          ) {
+        domElements.forEach((domElement: HTMLElement) => {
+          if (isPageStructureElement(domElement)) {
             console.log(
-              "Judol Detector: Skipping element for highlighting (already highlighted or is a structure element).",
-              htmlElement
+              "Judol Detector: Skipping highlight on critical element:",
+              domElement
             )
             return
           }
-
-          console.log("Judol Detector: Highlighting element:", htmlElement)
-          // Apply highlighting styles
-          htmlElement.style.border = "2px solid #ef4444"
-          htmlElement.style.backgroundColor = "rgba(239, 68, 68, 0.1)"
-          htmlElement.style.borderRadius = "4px"
-          htmlElement.title = `Suspicious content detected (${Math.round(element.confidence * 100)}% confidence)`
-          htmlElement.setAttribute("data-judol-highlighted", "true")
-          htmlElement.setAttribute(
-            "data-judol-original-border",
-            htmlElement.style.border || ""
-          )
-          htmlElement.setAttribute(
-            "data-judol-original-background",
-            htmlElement.style.backgroundColor || ""
-          )
+          domElement.style.backgroundColor = "yellow"
+          domElement.style.border = "2px solid red"
+          domElement.title = `Suspicious content detected with ${
+            element.confidence * 100
+          }% confidence. Keywords: ${element.details.matched_keywords?.join(", ")}`
         })
-      } catch (error) {
-        console.warn(
-          "Failed to highlight element with selector:",
-          element.selector,
-          error
+      } catch (e) {
+        console.error(
+          `Judol Detector: Failed to apply highlight for selector "${element.selector}":`,
+          e
         )
       }
     }
@@ -296,66 +289,79 @@ function highlightSuspiciousContent() {
 }
 
 // Blur suspicious content
-function blurSuspiciousContent() {
+function blurSuspiciousContent(results: AnalysisResult[]) {
   console.log("Judol Detector: Blurring suspicious content.")
-  if (!analysisResults?.suspicious_elements) {
+  if (!results) {
     console.log("Judol Detector: No suspicious elements to blur.")
     return
   }
 
-  analysisResults.suspicious_elements.forEach((element) => {
-    console.log(`Judol Detector: Checking element for blurring:`, element)
+  results.forEach((element) => {
     if (element.confidence >= settings.threshold) {
       try {
         const domElements = document.querySelectorAll(element.selector)
         console.log(
-          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}"`
+          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}" to blur.`
         )
-
-        // Safety check: don't blur too many elements at once
-        if (domElements.length > 10) {
-          console.warn(
-            `Selector "${element.selector}" matches too many elements (${domElements.length}). Skipping to avoid blurring entire page.`
-          )
-          return
-        }
-
-        domElements.forEach((domElement) => {
-          const htmlElement = domElement as HTMLElement
-
-          // Skip if element is already blurred or if it's a critical page element
-          if (
-            htmlElement.hasAttribute("data-judol-blurred") ||
-            isPageStructureElement(htmlElement)
-          ) {
+        domElements.forEach((domElement: HTMLElement) => {
+          if (isPageStructureElement(domElement)) {
             console.log(
-              "Judol Detector: Skipping element for blurring (already blurred or is a structure element).",
-              htmlElement
+              "Judol Detector: Skipping blur on critical element:",
+              domElement
             )
             return
           }
+          const wrapper = domElement.parentElement?.classList.contains(
+            "judol-blur-wrapper"
+          )
+            ? domElement.parentElement
+            : document.createElement("div")
 
-          console.log("Judol Detector: Blurring element:", htmlElement)
-          // Apply blur styles
-          htmlElement.style.filter = "blur(5px)"
-          htmlElement.style.pointerEvents = "none"
-          htmlElement.style.transition = "filter 0.3s ease"
-          htmlElement.title = `Content blurred due to suspicious gambling content`
-          htmlElement.setAttribute("data-judol-blurred", "true")
-          htmlElement.setAttribute(
-            "data-judol-original-filter",
-            htmlElement.style.filter || ""
-          )
-          htmlElement.setAttribute(
-            "data-judol-original-pointer-events",
-            htmlElement.style.pointerEvents || ""
-          )
+          // Avoid re-wrapping
+          if (!wrapper.classList.contains("judol-blur-wrapper")) {
+            wrapper.classList.add("judol-blur-wrapper")
+            wrapper.style.position = "relative"
+            wrapper.style.display = "inline-block" // Or block, depending on element
+            domElement.parentNode.insertBefore(wrapper, domElement)
+            wrapper.appendChild(domElement)
+          }
+
+          const overlay = document.createElement("div")
+          overlay.classList.add("judol-blur-overlay")
+          overlay.style.position = "absolute"
+          overlay.style.top = "0"
+          overlay.style.left = "0"
+          overlay.style.width = "100%"
+          overlay.style.height = "100%"
+          overlay.style.backgroundColor = "rgba(255, 255, 255, 0.5)"
+          overlay.style.backdropFilter = "blur(10px)"
+          overlay.style.zIndex = "9998"
+          overlay.style.textAlign = "center"
+          overlay.style.color = "black"
+          overlay.style.fontSize = "14px"
+          overlay.style.display = "flex"
+          overlay.style.justifyContent = "center"
+          overlay.style.alignItems = "center"
+          overlay.innerHTML = `
+            <div style="padding: 10px; background: white; border-radius: 5px;">
+              Potentially suspicious content hidden.<br/>
+              (Confidence: ${Math.round(element.confidence * 100)}%)
+              <button class="judol-unblur-btn" style="margin-left: 10px; padding: 2px 5px; border: 1px solid #ccc; cursor: pointer;">Show</button>
+            </div>`
+          wrapper.appendChild(overlay)
+
+          const unblurBtn = overlay.querySelector(
+            ".judol-unblur-btn"
+          ) as HTMLButtonElement
+          unblurBtn.onclick = (e) => {
+            e.stopPropagation()
+            wrapper.removeChild(overlay)
+          }
         })
-      } catch (error) {
-        console.warn(
-          "Failed to blur element with selector:",
-          element.selector,
-          error
+      } catch (e) {
+        console.error(
+          `Judol Detector: Failed to apply blur for selector "${element.selector}":`,
+          e
         )
       }
     }
@@ -363,123 +369,58 @@ function blurSuspiciousContent() {
 }
 
 // Hide suspicious content
-function hideSuspiciousContent() {
+function hideSuspiciousContent(results: AnalysisResult[]) {
   console.log("Judol Detector: Hiding suspicious content.")
-  if (!analysisResults?.suspicious_elements) {
+  if (!results) {
     console.log("Judol Detector: No suspicious elements to hide.")
     return
   }
 
-  analysisResults.suspicious_elements.forEach((element) => {
-    console.log(`Judol Detector: Checking element for hiding:`, element)
+  results.forEach((element) => {
     if (element.confidence >= settings.threshold) {
       try {
         const domElements = document.querySelectorAll(element.selector)
         console.log(
-          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}"`
+          `Judol Detector: Found ${domElements.length} elements with selector "${element.selector}" to hide.`
         )
-
-        // Safety check: don't hide too many elements at once
-        if (domElements.length > 10) {
-          console.warn(
-            `Selector "${element.selector}" matches too many elements (${domElements.length}). Skipping to avoid hiding entire page.`
-          )
-          return
-        }
-
-        domElements.forEach((domElement) => {
-          const htmlElement = domElement as HTMLElement
-
-          // Skip if element is already hidden or if it's a critical page element
-          if (
-            htmlElement.hasAttribute("data-judol-hidden") ||
-            isPageStructureElement(htmlElement)
-          ) {
+        domElements.forEach((domElement: HTMLElement) => {
+          if (isPageStructureElement(domElement)) {
             console.log(
-              "Judol Detector: Skipping element for hiding (already hidden or is a structure element).",
-              htmlElement
+              "Judol Detector: Skipping hide on critical element:",
+              domElement
             )
             return
           }
-
-          console.log("Judol Detector: Hiding element:", htmlElement)
-          // Store original display value before hiding
-          htmlElement.setAttribute(
-            "data-judol-original-display",
-            htmlElement.style.display || ""
-          )
-          htmlElement.style.display = "none"
-          htmlElement.setAttribute("data-judol-hidden", "true")
+          domElement.style.display = "none"
         })
-      } catch (error) {
-        console.warn(
-          "Failed to hide element with selector:",
-          element.selector,
-          error
+      } catch (e) {
+        console.error(
+          `Judol Detector: Failed to hide content for selector "${element.selector}":`,
+          e
         )
       }
     }
   })
 }
 
-// Clear all highlights and effects
+// Clear all highlights, blurs, etc.
 function clearHighlights() {
-  // Remove all applied styles using the data attributes we set
-  const highlightedElements = document.querySelectorAll(
-    "[data-judol-highlighted]"
+  console.log("Judol Detector: Clearing all visual markers.")
+  const highlighted = document.querySelectorAll(
+    '[style*="background-color: yellow"]'
   )
-  const blurredElements = document.querySelectorAll("[data-judol-blurred]")
-  const hiddenElements = document.querySelectorAll("[data-judol-hidden]")
-
-  // Clear highlighted elements and restore original styles
-  highlightedElements.forEach((element) => {
-    const htmlElement = element as HTMLElement
-    const originalBorder = htmlElement.getAttribute(
-      "data-judol-original-border"
-    )
-    const originalBackground = htmlElement.getAttribute(
-      "data-judol-original-background"
-    )
-
-    htmlElement.style.border = originalBorder || ""
-    htmlElement.style.backgroundColor = originalBackground || ""
-    htmlElement.style.borderRadius = ""
-    htmlElement.title = ""
-    htmlElement.removeAttribute("data-judol-highlighted")
-    htmlElement.removeAttribute("data-judol-original-border")
-    htmlElement.removeAttribute("data-judol-original-background")
+  highlighted.forEach((el: HTMLElement) => {
+    el.style.backgroundColor = ""
+    el.style.border = ""
+    el.title = ""
   })
 
-  // Clear blurred elements and restore original styles
-  blurredElements.forEach((element) => {
-    const htmlElement = element as HTMLElement
-    const originalFilter = htmlElement.getAttribute(
-      "data-judol-original-filter"
-    )
-    const originalPointerEvents = htmlElement.getAttribute(
-      "data-judol-original-pointer-events"
-    )
+  const blurOverlays = document.querySelectorAll(".judol-blur-overlay")
+  blurOverlays.forEach((overlay) => overlay.remove())
 
-    htmlElement.style.filter = originalFilter || ""
-    htmlElement.style.pointerEvents = originalPointerEvents || ""
-    htmlElement.style.transition = ""
-    htmlElement.title = ""
-    htmlElement.removeAttribute("data-judol-blurred")
-    htmlElement.removeAttribute("data-judol-original-filter")
-    htmlElement.removeAttribute("data-judol-original-pointer-events")
-  })
-
-  // Clear hidden elements and restore original styles
-  hiddenElements.forEach((element) => {
-    const htmlElement = element as HTMLElement
-    const originalDisplay = htmlElement.getAttribute(
-      "data-judol-original-display"
-    )
-
-    htmlElement.style.display = originalDisplay || ""
-    htmlElement.removeAttribute("data-judol-hidden")
-    htmlElement.removeAttribute("data-judol-original-display")
-  })
+  // Restore hidden elements (this is tricky, might need a better approach)
+  // For now, let's assume we don't restore hidden elements on the fly
+  // unless we add a class to track them.
 }
 
 let observer: MutationObserver | null = null
@@ -536,36 +477,41 @@ function sendMessage(message) {
   })
 }
 
-// Listen for messages from popup
+// Listen for messages from the popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getAnalysisResults") {
-    sendResponse({ results: analysisResults })
+    // The popup is asking for the analysis results. Send them back directly.
+    sendResponse(analysisResults)
+    return true // Keep message port open for async response
   }
 
-  if (request.action === "startAnalysis") {
-    startAnalysis()
-      .then(() => {
-        sendResponse({ success: true })
-      })
-      .catch((error) => {
-        sendResponse({ success: false, error: error.message })
-      })
-    return true // Keep message channel open
+  if (request.action === "updateSettings") {
+    console.log(
+      "Judol Detector: Received new settings from popup:",
+      request.settings
+    )
+    settings = request.settings
+    // Refresh the highlighting/blurring based on new settings
+    if (analysisResults && analysisResults.length > 0) {
+      clearHighlights()
+      processAnalysisResults(analysisResults)
+    }
+    sendResponse({ success: true })
+    return true
   }
 
   if (request.action === "clearHighlights") {
     clearHighlights()
     sendResponse({ success: true })
+    return true
   }
 
-  if (request.action === "updateSettings") {
-    settings = request.settings
-    // Refresh the highlighting/blurring based on new settings
-    if (analysisResults && analysisResults.overall.is_judol) {
-      clearHighlights()
-      processAnalysisResults()
-    }
-    sendResponse({ success: true })
+  if (request.action === "startAnalysis") {
+    // Re-run analysis when requested from popup
+    startAnalysis().then(() => {
+      sendResponse({ success: true })
+    })
+    return true // Keep message port open for async response
   }
 })
 

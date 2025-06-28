@@ -12,479 +12,199 @@ from nltk.tokenize import word_tokenize
 import os
 import io
 import requests
-from PIL import Image
-import pytesseract
 import redis
 import json
 import ahocorasick
 import polars as pl
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 class JudolDetector:
     def __init__(self, keywords_file='keywords.csv'):
         # --- Polars Optimization ---
-        self.keywords_df = pl.read_csv(keywords_file)
-        self.keywords_dict = dict(zip(
-            self.keywords_df['Keyword'].str.to_lowercase(),
-            self.keywords_df['Score']
-        ))
-        # --- End Polars Optimization ---
-        self.regex_patterns = {
-            r'\w*bet\d+': 15,
-            r'\w*slot\d+': 15,
-            r'\w*toto\d+': 15,
-            r'gacor\d+': 15,
-            r'hoki\d+': 12
-        }
-        self.vectorizer = TfidfVectorizer(
-            max_features=5000,
-            ngram_range=(1, 3),
-            stop_words='english'
-        )
-        self.model = None
-        self.threshold = 0.5
-        
-        # Caches to avoid re-processing the same content within a single analysis
-        # self.text_prediction_cache = {}
-        # self.image_analysis_cache = {}
+        # Use Polars for fast keyword loading and manipulation
         try:
-            self.redis_conn = redis.Redis(host='redis', port=6379, db=0)
-            self.redis_conn.ping()
-            print("Successfully connected to Redis.")
-            self.cache_enabled = True
-        except redis.exceptions.ConnectionError as e:
-            print(f"Could not connect to Redis: {e}. Caching will be disabled.")
-            self.cache_enabled = False
+            keyword_df = pl.read_csv(keywords_file)
+            keyword_df = keyword_df.with_columns(
+                pl.col("Keyword").str.to_lowercase().alias("keyword")
+            )
+            # For now, treat all entries as keywords. Regex can be added back later if needed.
+            self.keywords = keyword_df.select(["keyword", "Score"]).rename({"Score": "score"}).to_dicts()
+            self.regex_patterns = [] # No regex from this file for now
+            print(f"✅ Loaded {len(self.keywords)} keywords using Polars.")
+        except Exception as e:
+            print(f"❌ Error loading keywords with Polars: {e}")
+            self.keywords = []
+            self.regex_patterns = []
 
-
-        # --- Aho-Corasick Optimization ---
-        # Using pyahocorasick for ultra-fast multi-keyword matching
+        # --- Aho-Corasick for fast keyword matching ---
         self.automaton = ahocorasick.Automaton()
-        for keyword, score in self.keywords_dict.items():
-            self.automaton.add_word(keyword, (keyword, score))
+        for idx, keyword_data in enumerate(self.keywords):
+            self.automaton.add_word(keyword_data['keyword'], (keyword_data['keyword'], keyword_data['score']))
         self.automaton.make_automaton()
-        # --- End of Aho-Corasick Optimization ---
-
-        # Download NLTK data if not present
-        try:
-            nltk.data.find('tokenizers/punkt')
-        except LookupError:
-            nltk.download('punkt')
+        print("✅ Aho-Corasick automaton built.")
         
+        self.vectorizer = TfidfVectorizer(max_features=5000)
+        self.model = None
+        self.redis_client = redis.StrictRedis(host='redis', port=6379, db=0)
+
+        # Download necessary NLTK data if not present
         try:
-            nltk.data.find('corpora/stopwords')
+            stopwords.words('english')
         except LookupError:
+            print("Downloading NLTK stopwords...")
             nltk.download('stopwords')
-    
+        try:
+            word_tokenize('test')
+        except LookupError:
+            print("Downloading NLTK punkt...")
+            nltk.download('punkt')
+
+
     def preprocess_text(self, text):
-        """Clean and preprocess text"""
         if not isinstance(text, str):
             return ""
-        
-        # Convert to lowercase
         text = text.lower()
-        
-        # Remove HTML tags
-        text = re.sub(r'<[^>]+>', ' ', text)
-        
-        # Remove special characters but keep spaces
-        text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text)
-        
-        # Remove extra whitespaces
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        return text
-    
+        text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
+        text = re.sub(r'[^a-zA-Z\s]', '', text)  # Remove punctuation and numbers
+        tokens = word_tokenize(text)
+        stop_words = set(stopwords.words('english'))
+        tokens = [word for word in tokens if word not in stop_words and len(word) > 1]
+        return " ".join(tokens)
+
     def extract_keyword_features(self, text):
-        """Extract keyword-based features"""
-        text = self.preprocess_text(text)
+        """
+        Extracts features based on keyword matches and regex patterns.
+        Returns a dictionary of features.
+        """
+        features = {'keyword_score': 0, 'regex_score': 0}
         
-        # Calculate keyword score
-        total_score = 0
-        matched_keywords = []
-        
-        # --- Aho-Corasick Keyword Matching ---
-        for end_index, (keyword, score) in self.automaton.iter(text):
-            total_score += score
-            matched_keywords.append(keyword)
-        # --- End of Aho-Corasick Keyword Matching ---
-        
-        for pattern, score in self.regex_patterns.items():
-            matches = re.findall(pattern, text)
-            if matches:
-                count = len(matches)
-                total_score += score * count
-                matched_keywords.extend(matches)
+        # Use Aho-Corasick for keyword matching
+        for end_index, (keyword, score) in self.automaton.iter(text.lower()):
+            features['keyword_score'] += score
 
-        # Additional features
-        features = {
-            'keyword_score': total_score,
-            'keyword_count': len(matched_keywords),
-            'unique_keywords': len(set(matched_keywords)),
-            'avg_keyword_score': total_score / max(len(matched_keywords), 1),
-            'text_length': len(text),
-            'word_count': len(text.split()),
-        }
+        # Use pre-compiled regex for pattern matching
+        for pattern_data in self.regex_patterns:
+            if re.search(pattern_data['keyword'], text.lower()):
+                features['regex_score'] += pattern_data['score']
         
-        return features, matched_keywords
-    
-    def create_training_data(self):
-        """Create training data from keywords"""
-        # Positive samples (judol content)
-        positive_samples = []
-        
-        # Generate synthetic positive samples using keywords
-        for keyword, score in self.keywords_dict.items():
-            # Create variations of text containing the keyword
-            positive_samples.extend([
-                f"Dapatkan {keyword} terbaik sekarang juga!",
-                f"Situs {keyword} terpercaya dan gacor",
-                f"Main {keyword} dapat bonus besar",
-                f"Daftar {keyword} gratis tanpa deposit",
-                f"{keyword} dengan RTP tinggi",
-                f"Link alternatif {keyword} resmi",
-                f"Bonus new member {keyword}",
-                f"{keyword} minimal deposit 10 ribu",
-            ])
-        
-        # Negative samples (clean content)
-        negative_samples = [
-            "Resep masakan Indonesia yang lezat dan mudah dibuat untuk keluarga tercinta.",
-            "Tutorial programming Python untuk pemula dengan contoh kode yang lengkap.",
-            "Berita terkini tentang teknologi dan inovasi terbaru di Indonesia.",
-            "Tips kesehatan dan olahraga untuk menjaga kondisi tubuh tetap prima.",
-            "Panduan lengkap cara menanam bunga mawar di halaman rumah.",
-            "Review mendalam mengenai kamera mirrorless terbaru di pasaran.",
-            "Sejarah kemerdekaan Indonesia dan perjuangan para pahlawan.",
-            "Diskusi mengenai dampak kecerdasan buatan terhadap pasar kerja.",
-            "Cara efektif mengelola keuangan pribadi untuk mencapai kebebasan finansial.",
-            "Belajar bahasa Inggris otodidak melalui film dan musik.",
-            "Kumpulan resep kue kering untuk Lebaran yang renyah dan nikmat.",
-            "Analisis pertandingan sepak bola antara tim nasional Indonesia dan Vietnam.",
-            "Tips dan trik fotografi landscape untuk pemula.",
-            "Pentingnya pendidikan karakter sejak usia dini bagi perkembangan anak.",
-            "Menjelajahi keindahan alam bawah laut di Raja Ampat, Papua.",
-            "Teknik dasar bermain gitar untuk pemula, dari kunci dasar hingga melodi sederhana.",
-            "Perkembangan terbaru dalam penelitian sel punca untuk pengobatan penyakit degeneratif.",
-            "Cara membuat pupuk kompos dari sampah organik rumah tangga.",
-            "Ulasan buku fiksi ilmiah terbaik sepanjang masa yang wajib dibaca.",
-            "Membangun portofolio desain grafis yang menarik bagi calon klien.",
-            "Resep masakan Indonesia yang lezat",
-            "Tutorial belajar programming Python",
-            "Berita terkini politik dan ekonomi",
-            "Review gadget dan teknologi terbaru",
-            "Tips kesehatan dan olahraga",
-            "Panduan traveling ke berbagai destinasi",
-            "Artikel pendidikan dan pembelajaran",
-            "Informasi lowongan kerja terbaru",
-            "Tutorial makeup dan fashion",
-            "Berita olahraga sepak bola",
-            "Resep kue dan dessert",
-            "Tips investasi dan keuangan",
-            "Artikel parenting dan keluarga",
-            "Review film dan entertainment",
-            "Panduan budidaya tanaman",
-            "Berita teknologi dan inovasi",
-            "Tutorial musik dan instrumen",
-            "Artikel sejarah dan budaya",
-            "Tips fotografi dan videografi",
-            "Panduan DIY dan kerajinan",
-            "Cara membuat kue bolu yang empuk dan lezat",
-            "Tutorial menjahit baju untuk pemula",
-            "Belajar bermain gitar dengan mudah",
-            "Tips menanam sayuran hidroponik di rumah",
-            "Panduan lengkap ibadah haji dan umroh",
-            "Kumpulan doa-doa harian untuk anak",
-            "Cerita nabi dan rasul untuk anak-anak",
-            "Belajar bahasa Arab dasar untuk pemula",
-            "Peluang bisnis online di tahun 2025",
-            "Strategi marketing digital untuk UMKM",
-        ] * 50  # Multiply to balance the dataset
-        
-        # Create DataFrame
-        data = []
-        
-        # Add positive samples
-        for text in positive_samples:
-            data.append({'text': text, 'label': 1})
-        
-        # Add negative samples
-        for text in negative_samples:
-            data.append({'text': text, 'label': 0})
-        
-        return pd.DataFrame(data)
-    
-    def train_model(self):
-        """Train the judol detection model"""
-        print("Creating training data...")
-        df = self.create_training_data()
-        
-        print(f"Training data size: {len(df)} samples")
-        print(f"Positive samples: {len(df[df['label'] == 1])}")
-        print(f"Negative samples: {len(df[df['label'] == 0])}")
-        
-        # Extract features
-        print("Extracting features...")
-        X_text = []
-        X_features = []
-        y = df['label'].values
-        
-        for text in df['text']:
-            processed_text = self.preprocess_text(text)
-            X_text.append(processed_text)
-            
-            features, _ = self.extract_keyword_features(text)
-            X_features.append(list(features.values()))
-        
-        # TF-IDF features
-        X_tfidf = self.vectorizer.fit_transform(X_text)
-        
-        # Combine features
-        X_combined = np.hstack([
-            X_tfidf.toarray(),
-            np.array(X_features)
-        ])
-        
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_combined, y, test_size=0.2, random_state=42, stratify=y
-        )
-        
-        # Train model
-        print("Training model...")
-        self.model = RandomForestClassifier(
-            n_estimators=100,
-            random_state=42,
-            class_weight='balanced'
-        )
-        self.model.fit(X_train, y_train)
-        
-        # Evaluate
-        y_pred = self.model.predict(X_test)
-        print(f"Accuracy: {accuracy_score(y_test, y_pred):.3f}")
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred))
-        
-        # Save model
-        self.save_model()
-        print("Model saved successfully!")
-    
+        return features
+
     def predict(self, text):
-        """Predict if text contains judol content"""
-        # --- Caching Optimization ---
-        if self.cache_enabled:
-            cached_result = self.redis_conn.get(f"text:{text}")
-            if cached_result:
-                return json.loads(cached_result)
-        # --- End of Caching ---
-
-        if self.model is None:
-            self.load_model()
+        """
+        Predicts if the text is gambling-related based on a hybrid approach.
+        First, it checks for direct keyword hits for a fast path.
+        If keywords are present, it returns a high confidence score.
+        If not, it can eventually fall back to a trained text classifier model (future).
+        """
         
-        # Preprocess text
         processed_text = self.preprocess_text(text)
         
-        # Extract features
-        features, matched_keywords = self.extract_keyword_features(text)
+        # Check cache first
+        try:
+            cached_result = self.redis_client.get(f"judol-text:{processed_text}")
+            if cached_result:
+                print("✅ Text cache hit")
+                return json.loads(cached_result)
+        except redis.exceptions.RedisError as e:
+            print(f"⚠️ Redis cache read error: {e}")
+
+
+        # --- Keyword & Regex Analysis ---
+        keyword_features = self.extract_keyword_features(text) # Use original text for keywords
+        total_score = keyword_features['keyword_score'] + keyword_features['regex_score']
         
-        # TF-IDF features
-        X_tfidf = self.vectorizer.transform([processed_text])
+        # The confidence is normalized based on an arbitrary max score.
+        # Let's say a score of 20+ is a very strong signal.
+        confidence = min(1.0, total_score / 20.0)
         
-        # Combine features
-        X_combined = np.hstack([
-            X_tfidf.toarray(),
-            np.array([list(features.values())])
-        ])
-        
-        # Predict
-        probability = self.model.predict_proba(X_combined)[0][1]
-        is_judol = probability > self.threshold
-        
+        is_gambling = confidence > 0.5  # Use a threshold
+
         result = {
-            'is_judol': bool(is_judol),
-            'confidence': float(probability),
-            'keyword_score': features['keyword_score'],
-            'matched_keywords': matched_keywords,
-            'features': features
+            'is_gambling': is_gambling,
+            'confidence': confidence,
+            'details': {
+                'type': 'text',
+                'keyword_score': keyword_features['keyword_score'],
+                'regex_score': keyword_features['regex_score']
+            }
         }
         
-        if self.cache_enabled:
-            # Cache result for 1 hour
-            self.redis_conn.set(f"text:{text}", json.dumps(result), ex=3600)
+        # Cache the result
+        try:
+            self.redis_client.setex(f"judol-text:{processed_text}", 3600, json.dumps(result))
+        except redis.exceptions.RedisError as e:
+            print(f"⚠️ Redis cache write error: {e}")
+
         return result
-    
-    def analyze_html_content(self, html_content):
-        """Analyze HTML content and identify judol elements"""
-        from bs4 import BeautifulSoup
-        
+
+
+    def analyze_html_content(self, html_content, base_url=None, image_urls=None):
+        """
+        Analyzes the HTML content for gambling-related material.
+        It checks text content and image URLs.
+        """
+        results = []
         soup = BeautifulSoup(html_content, 'html.parser')
         
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-        
-        # Get text content
-        text_content = soup.get_text()
-        
-        # Analyze full content
-        overall_result = self.predict(text_content)
-        
-        # --- Start of Image Analysis ---
-        suspicious_images = []
-        img_tags = soup.find_all('img')
-        print(f"Found {len(img_tags)} image tags to analyze.")
+        # 1. Analyze all text content from the page
+        all_text = soup.get_text(separator=' ', strip=True)
+        text_prediction = self.predict(all_text)
+        if text_prediction['is_gambling']:
+            results.append({
+                'is_gambling': True,
+                'confidence': text_prediction['confidence'],
+                'selector': 'body',
+                'type': 'text',
+                'details': text_prediction['details']
+            })
 
-        for img in img_tags:
-            try:
-                img_url = img.get('src')
-                if not img_url or img_url.startswith('data:'):
-                    continue
+        # 2. Analyze image URLs for keywords
+        if image_urls is None:
+            image_urls = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+        
+        for url in image_urls:
+            prediction = self._analyze_url_for_keywords(url)
+            if prediction:
+                 results.append({
+                    'is_gambling': True,
+                    'confidence': prediction['confidence'],
+                    'selector': f"img[src='{url}']",
+                    'type': 'image_url',
+                    'details': {'matched_keywords': prediction['matched_keywords']}
+                })
 
-                # Make URL absolute
-                from urllib.parse import urljoin
-                # This part is tricky as we don't have the base URL here.
-                # This will be handled in the API server instead.
+        return results
 
-                print(f"Analyzing image: {img_url}")
-                image_result = self.analyze_image_url(img_url)
-
-                if image_result['is_judol'] and image_result['confidence'] > 0.75:
-                    selector = self._generate_css_selector(img)
-                    suspicious_images.append({
-                        'selector': selector,
-                        'text': image_result['text'],
-                        'confidence': image_result['confidence'],
-                        'matched_keywords': image_result['matched_keywords']
-                    })
-            except Exception as e:
-                print(f"Could not analyze image {img.get('src')}: {e}")
-        # --- End of Image Analysis ---
-
-        # Analyze individual elements
-        suspicious_elements = []
-        
-        # Check specific elements that commonly contain judol content
-        # Prioritize elements that are more likely to contain meaningful content
-        elements_to_check = []
-        
-        # High priority elements (likely to contain suspicious content)
-        high_priority = soup.find_all(['h1', 'h2', 'h3', 'title', 'a'])
-        elements_to_check.extend(high_priority)
-        
-        # Medium priority elements (might contain suspicious content)
-        medium_priority = soup.find_all(['p', 'span', 'button'])
-        elements_to_check.extend(medium_priority)
-        
-        # Low priority elements (less likely but still check)
-        low_priority = soup.find_all(['div'])
-        # Limit div elements to avoid checking too many generic containers
-        elements_to_check.extend(low_priority[:50])  # Only check first 50 divs
-        
-        # Track processed text to avoid duplicates
-        processed_texts = set()
-        
-        for element in elements_to_check:
-            element_text = element.get_text().strip()
+    def _analyze_url_for_keywords(self, url):
+        """Analyzes a single URL for keywords."""
+        if not isinstance(url, str):
+            return None
             
-            # Skip if text is too short, too long, or already processed
-            if (len(element_text) < 15 or 
-                len(element_text) > 500 or 
-                element_text in processed_texts):
-                continue
-                
-            # Skip if element is likely to be navigation or structure
-            if self._is_structural_element(element):
-                continue
-                
-            processed_texts.add(element_text)
-            
-            result = self.predict(element_text)
-            
-            # Use a higher confidence threshold to reduce false positives
-            if result['is_judol'] and result['confidence'] > 0.7:
-                # Get element selector
-                selector = self._generate_css_selector(element)
-                
-                # Verify selector doesn't match too many elements
-                try:
-                    # Simple check: if selector contains only tag name, it's too generic
-                    if selector and not any(char in selector for char in ['.', '#', ':', '>']):
-                        continue
-                        
-                    suspicious_elements.append({
-                        'selector': selector,
-                        'text': element_text[:100] + '...' if len(element_text) > 100 else element_text,
-                        'confidence': result['confidence'],
-                        'matched_keywords': result['matched_keywords']
-                    })
-                except Exception as e:
-                    print(f"Error processing element: {e}")
-                    continue
+        text_to_check = url.lower()
+        matched_keywords = []
+        total_score = 0
         
-        # Combine text and image results
-        all_suspicious_elements = suspicious_elements + suspicious_images
+        # Aho-Corasick for keywords
+        for _, (keyword, score) in self.automaton.iter(text_to_check):
+            matched_keywords.append(keyword)
+            total_score += score
+        
+        # Regex for patterns
+        for pattern_data in self.regex_patterns:
+            if re.search(pattern_data['keyword'], text_to_check):
+                total_score += pattern_data['score']
+                matched_keywords.append(pattern_data['keyword']) # Add pattern for context
 
-        return {
-            'overall': overall_result,
-            'suspicious_elements': all_suspicious_elements,
-            'total_suspicious_elements': len(all_suspicious_elements)
-        }
-    
-    def analyze_image_url(self, image_url):
-        """Analyze an image from a URL for judol content using OCR."""
-        # --- Caching Optimization ---
-        if self.cache_enabled:
-            cached_result = self.redis_conn.get(f"image:{image_url}")
-            if cached_result:
-                return json.loads(cached_result)
-        # --- End of Caching ---
-        try:
-            # Download image
-            response = requests.get(image_url, stream=True, timeout=10)
-            response.raise_for_status()
-
-            # Read image from response
-            image_bytes = io.BytesIO(response.content)
-            image = Image.open(image_bytes)
-
-            # --- OCR Optimization ---
-            # 1. Skip small images that are unlikely to be ads
-            if image.width < 50 or image.height < 50:
-                # print(f"Skipping small image ({image.width}x{image.height}): {image_url}")
-                return {'is_judol': False, 'confidence': 0, 'text': ''}
-
-            # 2. Pre-process image for OCR: convert to grayscale
-            image = image.convert('L')
-            # --- End of Optimization ---
-
-            # Perform OCR
-            extracted_text = pytesseract.image_to_string(image, lang='ind')
-            print(f"Extracted text from image: {extracted_text[:100]}...")
-
-            if not extracted_text.strip():
-                return {'is_judol': False, 'confidence': 0, 'text': ''}
-
-            # Analyze extracted text
-            result = self.predict(extracted_text)
-            final_result = {
-                'is_judol': result['is_judol'],
-                'confidence': result['confidence'],
-                'text': extracted_text,
-                'matched_keywords': result['matched_keywords']
+        if matched_keywords:
+            return {
+                'confidence': min(1.0, total_score / 20.0),
+                'matched_keywords': list(set(matched_keywords))
             }
-            if self.cache_enabled:
-                # Cache result for 1 hour
-                self.redis_conn.set(f"image:{image_url}", json.dumps(final_result), ex=3600)
-            return final_result
-
-        except Exception as e:
-            print(f"Failed to process image URL {image_url}: {e}")
-            final_result = {'is_judol': False, 'confidence': 0, 'text': ''}
-            # Do not cache failure results permanently, but you could add a short-lived cache here if needed
-            return final_result
+        return None
 
     def _is_structural_element(self, element):
         """Check if element is likely a structural/navigation element"""
-        # Check tag attributes for structural indicators
         element_class = ' '.join(element.get('class', [])).lower()
         element_id = (element.get('id') or '').lower()
         
@@ -497,81 +217,46 @@ class JudolDetector:
                   for indicator in structural_indicators)
     
     def _generate_css_selector(self, element):
-        """Generate a specific CSS selector for an element"""
         if element.get('id'):
             return f"#{element.get('id')}"
         
-        path_parts = []
+        path = []
         current = element
         
-        for _ in range(5):  # Limit depth to avoid overly long selectors
-            if current is None or current.name is None:
+        while current:
+            if current.name:
+                path.append(current.name)
+            # Stop if we hit the body or run out of parents
+            if current.name == 'body' or not current.parent:
                 break
-                
-            part = current.name
-            
-            # Add class information if available
-            if current.get('class'):
-                classes = '.'.join(current.get('class'))
-                if classes:
-                    part += f".{classes}"
-            
-            # Add nth-of-type if there are siblings of the same type
-            if current.parent:
-                siblings = current.parent.find_all(current.name, recursive=False)
-                if len(siblings) > 1:
-                    try:
-                        index = [i for i, s in enumerate(siblings) if s is current][0]
-                        part += f":nth-of-type({index + 1})"
-                    except (ValueError, IndexError):
-                        pass # Could fail if element is not in siblings, though it should be
-            
-            path_parts.append(part)
             current = current.parent
-            
-            # Stop if we reach a good anchor (body, html, or an element with an ID)
-            if current is None or current.name in ['body', 'html'] or current.get('id'):
-                if current and current.get('id'):
-                    path_parts.append(f"#{current.get('id')}")
-                break
-        
-        # Reverse to get top-down path and join with descendant combinator
-        if path_parts:
-            path_parts.reverse()
-            return ' '.join(path_parts)
-        
-        # Fallback for elements that couldn't generate a path
-        selector = element.name
-        if element.get('class'):
-            classes = '.'.join(element.get('class')[:2])
-            if classes:
-                selector += f".{classes}"
-        
-        return selector
-    
-    def save_model(self):
-        """Save the trained model and vectorizer"""
-        os.makedirs('models', exist_ok=True)
-        
-        with open('models/judol_model.pkl', 'wb') as f:
+        # Reverse the list to get the path from body to element
+        path.reverse()
+        return ' > '.join(path)
+
+    def save_model(self, model_path='models/judol_model.pkl', vectorizer_path='models/vectorizer.pkl'):
+        """Saves the trained model and vectorizer."""
+        if not os.path.exists('models'):
+            os.makedirs('models')
+        with open(model_path, 'wb') as f:
             pickle.dump(self.model, f)
-        
-        with open('models/vectorizer.pkl', 'wb') as f:
+        with open(vectorizer_path, 'wb') as f:
             pickle.dump(self.vectorizer, f)
-    
-    def load_model(self):
-        """Load the trained model and vectorizer"""
+        print(f"✅ Model saved to {model_path} and vectorizer to {vectorizer_path}")
+
+    def load_model(self, model_path='models/judol_model.pkl', vectorizer_path='models/vectorizer.pkl'):
+        """Loads a pre-trained model and vectorizer."""
         try:
-            with open('models/judol_model.pkl', 'rb') as f:
-                self.model = pickle.load(f)
-            
-            with open('models/vectorizer.pkl', 'rb') as f:
-                self.vectorizer = pickle.load(f)
-                
-            print("Model loaded successfully!")
-        except FileNotFoundError:
-            print("Model not found. Please train the model first.")
-            raise
+            if os.path.exists(model_path) and os.path.exists(vectorizer_path):
+                with open(model_path, 'rb') as f:
+                    self.model = pickle.load(f)
+                with open(vectorizer_path, 'rb') as f:
+                    self.vectorizer = pickle.load(f)
+                print(f"✅ Model loaded from {model_path} and vectorizer from {vectorizer_path}")
+            else:
+                print("⚠️ Model files not found. Please train the model first.")
+        except Exception as e:
+            print(f"❌ Error loading model: {e}")
 
 if __name__ == "__main__":
     # Initialize detector
@@ -595,6 +280,6 @@ if __name__ == "__main__":
     for text in test_texts:
         result = detector.predict(text)
         print(f"\nText: {text}")
-        print(f"Is Judol: {result['is_judol']}")
+        print(f"Is Judol: {result['is_gambling']}")
         print(f"Confidence: {result['confidence']:.3f}")
-        print(f"Matched Keywords: {result['matched_keywords']}")
+        print(f"Matched Keywords: {result['details']['matched_keywords']}")
