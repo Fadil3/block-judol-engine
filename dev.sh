@@ -8,9 +8,9 @@ case "$1" in
         docker-compose up -d
         echo ""
         echo "Services started!"
-        echo "API: http://localhost:8000"
+        echo "API: http://localhost:7000"
         echo "Demo: http://localhost:8080"
-        echo "API Docs: http://localhost:8000/docs"
+        echo "API Docs: http://localhost:7000/docs"
         echo ""
         echo "To view logs: ./dev.sh logs"
         echo "To stop: ./dev.sh stop"
@@ -46,13 +46,13 @@ case "$1" in
         ;;
     "test")
         echo "Testing API..."
-        curl -X POST "http://localhost:8000/analyze" \
+        curl -X POST "http://localhost:7000/analyze" \
              -H "Content-Type: application/json" \
              -d '{"text": "Test content for judol detection"}'
         ;;
     "health")
         echo "Checking API health..."
-        curl -s http://localhost:8000/health | python -m json.tool
+        curl -s http://localhost:7000/health | python -m json.tool
         ;;
     *)
         echo "Judol Detection Engine - Development Helper"
@@ -73,8 +73,8 @@ case "$1" in
         echo "  health    - Check API health status"
         echo ""
         echo "URLs when running:"
-        echo "  API: http://localhost:8000"
+        echo "  API: http://localhost:7000"
         echo "  Demo: http://localhost:8080"
-        echo "  API Docs: http://localhost:8000/docs"
+        echo "  API Docs: http://localhost:7000/docs"
         ;;
 esac

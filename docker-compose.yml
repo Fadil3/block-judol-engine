@@ -4,7 +4,7 @@ services:
   judol-api:
     build: .
     ports:
-      - "8000:8000"
+      - "7000:8000"
     volumes:
       - .:/app
       - /app/__pycache__
@@ -27,6 +27,9 @@ services:
     restart: always
     ports:
       - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
 
   # Optional: Add a simple web server for serving static files (demo.html, etc.)
   web:
@@ -44,3 +47,4 @@ services:
 
 volumes:
   nltk_data:
+  redis_data:

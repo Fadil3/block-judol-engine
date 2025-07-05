@@ -13,9 +13,9 @@ This setup provides a convenient way to run the Judol Detection Engine using Doc
 2. **Access the applications:**
 
    - **API Tester:** http://localhost:8080 (Interactive testing interface)
-   - **API Documentation:** http://localhost:8000/docs (Swagger UI)
+   - **API Documentation:** http://localhost:7000/docs (Swagger UI)
    - **Demo Page:** http://localhost:8080/demo.html (Extension testing page)
-   - **API Health:** http://localhost:8000/health
+   - **API Health:** http://localhost:7000/health
 
 3. **Stop the services:**
    ```bash
@@ -24,12 +24,19 @@ This setup provides a convenient way to run the Judol Detection Engine using Doc
 
 ## Available Services
 
-### judol-api (Port 8000)
+### judol-api (Port 7000)
 
 - FastAPI application with the Judol Detection Engine
 - Automatic reload on code changes
 - Health check endpoint
 - CORS enabled for browser extension testing
+
+### redis (Port 6380)
+
+- Redis cache with persistent storage
+- AOF (Append-Only File) enabled for data durability
+- Caches text and image analysis results
+- Data survives container restarts
 
 ### web (Port 8080)
 
@@ -86,6 +93,8 @@ Use the `./dev.sh` script for common development tasks:
 - Current directory is mounted to `/app` for live code reloading
 - `__pycache__` is excluded to prevent host/container conflicts
 - Static files are served by nginx for browser testing
+- `redis_data` volume for persistent Redis cache storage
+- `nltk_data` volume for NLTK language data
 
 ## Environment Variables
 
