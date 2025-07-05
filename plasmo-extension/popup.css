@@ -4,27 +4,42 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   margin: 0;
   padding: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+}
+
+.inner-container {
+  background: #222222;
+  border-radius: 10px;
 }
 
 .header {
   padding: 20px;
+  display: flex;
+  justify-items: center;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header .logo {
+  height: 20px;
+
+  object-fit: contain;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.header .settings-icon {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.page-url {
   text-align: center;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-}
-
-.header h1 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.header p {
-  margin: 5px 0 0 0;
-  font-size: 12px;
-  opacity: 0.8;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 10px;
 }
 
 .loading {
@@ -58,17 +73,21 @@
   padding: 20px;
 }
 
+.page-url {
+  font-size: 20px;
+}
+
 .status-section {
-  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid #fff;
   border-radius: 10px;
   padding: 15px;
   margin-bottom: 20px;
-  backdrop-filter: blur(5px);
 }
 
 .status-indicator {
   display: flex;
   align-items: center;
+  justify-content: center;
   margin-bottom: 10px;
 }
 
@@ -100,11 +119,36 @@
   font-size: 14px;
 }
 
+.status-text.safe {
+  color: #1dcd9f;
+}
+
+.status-text.warning {
+  color: white;
+}
+
+.status-text.danger {
+  color: #ef4444;
+}
+
 .stats {
+  text-align: center;
   font-size: 12px;
   opacity: 0.9;
   line-height: 1.4;
   white-space: pre-line;
+}
+
+.suspicious-count {
+  font-weight: bold;
+  color: #ef4444;
+  font-size: 14px;
+}
+
+.safe-count {
+  font-weight: bold;
+  color: #1dcd9f;
+  font-size: 14px;
 }
 
 .controls-section {
@@ -118,9 +162,12 @@
 .control-group label {
   display: block;
   font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 5px;
-  opacity: 0.9;
+  font-weight: bold;
+  margin-bottom: 12px;
+  opacity: 1;
+  text-align: center;
+  text-transform: uppercase;
+  color: #fff;
 }
 
 .toggle-btn {
@@ -201,11 +248,15 @@ input[type="range"]::-moz-range-thumb {
 
 .actions-section {
   display: flex;
+  justify-content: space-between;
   gap: 10px;
+  margin-top: 15px;
+  flex-wrap: wrap;
 }
 
 .action-btn {
   flex: 1;
+  min-width: 80px;
   padding: 12px 16px;
   border: none;
   border-radius: 8px;
@@ -248,4 +299,342 @@ input[type="range"]::-moz-range-thumb {
 .action-btn:disabled:hover {
   transform: none;
   box-shadow: none;
+}
+
+/* Settings Page Styles */
+.settings-container {
+  padding: 15px;
+  background-color: #222222;
+  min-width: 350px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #eeeeee;
+  padding-bottom: 10px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #ffff;
+  flex-grow: 1;
+  text-align: center;
+}
+
+.back-button {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #ffff;
+  padding: 5px;
+}
+
+.back-button:hover {
+  color: #ffff;
+}
+
+.settings-container .control-group label {
+  color: #ffffff;
+}
+
+/* Stats Container Styles */
+.stats-container {
+  padding-top: 15px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 12px;
+}
+
+.stat-label {
+  flex-basis: auto;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 5px;
+}
+
+.progress-bar-container {
+  flex-grow: 1;
+  height: 12px;
+  background-color: #e0e0e0;
+  border-radius: 6px;
+  margin: 0;
+}
+
+.progress-bar {
+  height: 100%;
+  background-color: #4caf50;
+  border-radius: 6px;
+  transition: width 0.3s ease-in-out;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.stat-value {
+  display: none;
+}
+
+/* --- NEW Monetization Styles --- */
+
+/* Usage numbers display */
+.usage-numbers {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.usage-numbers .used {
+  color: #4ade80;
+}
+
+.usage-numbers .separator {
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0 5px;
+}
+
+.usage-numbers .limit {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Remaining blocks display */
+.remaining-blocks {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  text-align: center;
+  margin-top: 3px;
+  font-weight: 400;
+}
+
+/* Progress bar exceeded state */
+.progress-bar.exceeded {
+  background-color: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+/* Limit warning */
+.limit-warning {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+  margin-top: 8px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Subscription info section */
+.subscription-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 15px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.plan-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4ade80;
+  padding: 4px 8px;
+  background: rgba(74, 222, 128, 0.1);
+  border-radius: 4px;
+}
+
+.upgrade-btn {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
+}
+
+.upgrade-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+}
+
+/* Test button styling */
+.action-btn.test {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  color: white;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+}
+
+.action-btn.test:hover {
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
+/* Disabled state for scan button */
+.action-btn.primary.disabled {
+  background: linear-gradient(135deg, #6b7280, #4b5563);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.action-btn.primary.disabled:hover {
+  transform: none;
+  box-shadow: 0 4px 15px rgba(74, 222, 128, 0.3);
+}
+
+/* --- END NEW Monetization Styles --- */
+
+/* --- Blocked Amount Section (compact) --- */
+.stats-section {
+  margin-bottom: 18px;
+}
+
+.stats-title {
+  text-align: center;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: white;
+}
+
+.stats-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 0;
+}
+
+.progress-bar-container.large {
+  width: 100%;
+  height: 18px;
+  background: #fff;
+  border-radius: 999px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.progress-bar.large {
+  height: 100%;
+  background: #1dcd9f;
+  border-radius: 999px;
+  transition: width 0.3s ease-in-out;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.progress-label {
+  font-size: 12px;
+  font-weight: bold;
+  color: #1dcd9f;
+}
+
+.blocks-left {
+  text-align: center;
+  margin-top: 0;
+  margin-bottom: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.blocks-left-number {
+  color: #1dcd9f;
+  font-size: 12px;
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+.status-pill {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #1dcd9f;
+  border-radius: 999px;
+  background: transparent;
+  padding: 10px 0;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  font-size: 12px;
+  font-weight: bold;
+  outline: none;
+}
+.status-pill.disabled {
+  border-color: #ff4d4f;
+}
+.status-pill-icon {
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+}
+.status-pill-label {
+  color: #1dcd9f;
+  font-weight: bold;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.status-pill.disabled .status-pill-label {
+  color: #ff4d4f;
+}
+
+.subscribe-btn {
+  width: 100%;
+  background: #1dcd9f;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  cursor: pointer;
+  transition: background 0.2s;
+  letter-spacing: 1px;
+}
+.subscribe-btn:hover {
+  background: #17b88a;
 }

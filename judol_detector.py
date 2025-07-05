@@ -18,26 +18,40 @@ import ahocorasick
 import polars as pl
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 
 class JudolDetector:
     def __init__(self, keywords_file='keywords.csv'):
-        # --- Polars Optimization ---
-        # Use Polars for fast keyword loading and manipulation
+        # --- Polars Optimization for loading keywords from CSV ---
         try:
             keyword_df = pl.read_csv(keywords_file)
             keyword_df = keyword_df.with_columns(
                 pl.col("Keyword").str.to_lowercase().alias("keyword")
             )
-            # For now, treat all entries as keywords. Regex can be added back later if needed.
             self.keywords = keyword_df.select(["keyword", "Score"]).rename({"Score": "score"}).to_dicts()
-            self.regex_patterns = [] # No regex from this file for now
-            print(f"✅ Loaded {len(self.keywords)} keywords using Polars.")
+            print(f"✅ Loaded {len(self.keywords)} keywords from CSV using Polars.")
         except Exception as e:
             print(f"❌ Error loading keywords with Polars: {e}")
             self.keywords = []
-            self.regex_patterns = []
 
-        # --- Aho-Corasick for fast keyword matching ---
+        # --- Hardcoded Regex Patterns for broader, more flexible matching ---
+        self.regex_patterns = [
+            {'keyword': r'judi\d*', 'score': 15},
+            {'keyword': r'slot\d*', 'score': 15},
+            {'keyword': r'\d+slot', 'score': 15},
+            {'keyword': r'toto\d*', 'score': 15},
+            {'keyword': r'\d+toto', 'score': 15},
+            {'keyword': r'bet\d*', 'score': 15},
+            {'keyword': r'\d+bet', 'score': 15},
+            {'keyword': r'gacor\d*', 'score': 15},
+            {'keyword': r'hoki\d*', 'score': 12},
+            {'keyword': r'777', 'score': 10}, # Catch common slot numbers
+            {'keyword': r'88', 'score': 10},
+            {'keyword': r'89', 'score': 10},
+        ]
+        print(f"✅ Loaded {len(self.regex_patterns)} hardcoded regex patterns.")
+
+        # --- Aho-Corasick for fast exact keyword matching ---
         self.automaton = ahocorasick.Automaton()
         for idx, keyword_data in enumerate(self.keywords):
             self.automaton.add_word(keyword_data['keyword'], (keyword_data['keyword'], keyword_data['score']))
@@ -166,10 +180,24 @@ class JudolDetector:
         for url in image_urls:
             prediction = self._analyze_url_for_keywords(url)
             if prediction:
-                 results.append({
+                try:
+                    # Create a more robust selector by matching only the filename
+                    path = urlparse(url).path
+                    filename = os.path.basename(path)
+                    
+                    # Use the filename if it's valid, otherwise fallback to the full URL
+                    if filename and '.' in filename:
+                        selector = f"img[src*='{filename}']"
+                    else:
+                        selector = f"img[src='{url}']"
+                except Exception:
+                    # Fallback to the original selector on any parsing error
+                    selector = f"img[src='{url}']"
+
+                results.append({
                     'is_gambling': True,
                     'confidence': prediction['confidence'],
-                    'selector': f"img[src='{url}']",
+                    'selector': selector,
                     'type': 'image_url',
                     'details': {'matched_keywords': prediction['matched_keywords']}
                 })

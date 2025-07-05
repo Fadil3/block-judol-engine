@@ -3,16 +3,33 @@ import { Storage } from "@plasmohq/storage"
 const API_BASE_URL = "http://localhost:8000"
 const storage = new Storage()
 
-// Extension installation
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("Judol Content Blocker installed")
+// Extension installation or update
+chrome.runtime.onInstalled.addListener(async () => {
+  console.log("Judol Content Blocker installed/updated.")
 
-  // Set default settings
-  storage.setItem("enabled", true)
-  storage.setItem("threshold", 0.5)
-  storage.setItem("apiUrl", API_BASE_URL)
-  storage.setItem("blockingMode", "highlight")
-  storage.setItem("showNotifications", true)
+  // Manually check if settings exist before setting a default value.
+  // This prevents overwriting user settings on extension updates.
+  const currentMode = await storage.get("blockingMode")
+  if (currentMode === undefined) {
+    await storage.set("blockingMode", "blur") // Default to blur
+  }
+
+  const currentEnabled = await storage.get("enabled")
+  if (currentEnabled === undefined) {
+    await storage.set("enabled", true)
+  }
+
+  const currentThreshold = await storage.get("threshold")
+  if (currentThreshold === undefined) {
+    await storage.set("threshold", 0.5)
+  }
+
+  const currentApiUrl = await storage.get("apiUrl")
+  if (currentApiUrl === undefined) {
+    await storage.set("apiUrl", API_BASE_URL)
+  }
+
+  console.log("Judol Content Blocker: Default settings ensured.")
 })
 
 // Listen for tab updates
@@ -59,11 +76,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })()
     return true // Keep the message channel open for the async response
   }
-
-  if (request.action === "showNotification") {
-    showNotification(request.data)
-    // No async response needed, so we don't return true
-  }
 })
 
 // Analyze content using the API
@@ -94,22 +106,6 @@ async function analyzeContent(pageData) {
     console.error("API call failed:", error)
     throw error
   }
-}
-
-// Show notification
-async function showNotification(data) {
-  const showNotifications = await storage.get("showNotifications")
-
-  if (!showNotifications) return
-
-  const notificationOptions = {
-    type: "basic" as const,
-    iconUrl: "icon.png",
-    title: "Judol Content Detected",
-    message: data.message || "Suspicious gambling content found on this page"
-  }
-
-  chrome.notifications.create(notificationOptions)
 }
 
 export {}

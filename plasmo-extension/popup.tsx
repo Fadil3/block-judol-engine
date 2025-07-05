@@ -1,14 +1,22 @@
+import headerImage from "data-base64:~assets/header.png"
+import settingsImage from "data-base64:~assets/settings.png"
 import React, { useEffect, useState } from "react"
 
 import { Storage } from "@plasmohq/storage"
 
 import "./popup.css"
 
+import { SettingsPage } from "~components/settings"
+
 interface Settings {
   enabled: boolean
   threshold: number
-  blockingMode: "highlight" | "blur" | "hide"
-  showNotifications: boolean
+  blockingMode: "blur" | "hide"
+}
+
+interface BlockStats {
+  text: number
+  images: number
 }
 
 // --- NEW Interfaces to match backend ---
@@ -25,9 +33,50 @@ interface AnalysisResult {
   type: "text" | "image_url"
   details: AnalysisDetail
 }
+
+// --- NEW Monetization Interfaces ---
+interface SubscriptionPlan {
+  name: "free" | "monthly" | "yearly"
+  keywordLimit: number
+  imageLimit: number
+  price?: number
+}
+
+interface UsageStats {
+  keywordsUsed: number
+  imagesUsed: number
+  resetDate: string // ISO date string for when usage resets
+}
+
+interface SubscriptionStatus {
+  plan: SubscriptionPlan
+  usage: UsageStats
+  isActive: boolean
+}
 // --- END NEW Interfaces ---
 
 const storage = new Storage()
+
+// Subscription plans configuration
+const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
+  free: {
+    name: "free",
+    keywordLimit: 1000,
+    imageLimit: 100
+  },
+  monthly: {
+    name: "monthly",
+    keywordLimit: 100000,
+    imageLimit: 5000,
+    price: 9.99
+  },
+  yearly: {
+    name: "yearly",
+    keywordLimit: 1000000,
+    imageLimit: 50000,
+    price: 99.99
+  }
+}
 
 function IndexPopup() {
   const [currentTab, setCurrentTab] = useState<chrome.tabs.Tab | null>(null)
@@ -37,14 +86,32 @@ function IndexPopup() {
   const [settings, setSettings] = useState<Settings>({
     enabled: true,
     threshold: 0.5,
-    blockingMode: "highlight",
-    showNotifications: true
+    blockingMode: "blur"
   })
   const [loading, setLoading] = useState(true)
+  const [view, setView] = useState("main") // "main" or "settings"
+  const [blockStats, setBlockStats] = useState<BlockStats>({
+    text: 0,
+    images: 0
+  })
+  // --- NEW State for monetization ---
+  const [subscriptionStatus, setSubscriptionStatus] =
+    useState<SubscriptionStatus>({
+      plan: SUBSCRIPTION_PLANS.monthly,
+      usage: {
+        keywordsUsed: 50000,
+        imagesUsed: 2500,
+        resetDate: new Date().toISOString()
+      },
+      isActive: true
+    })
+  // --- END NEW State ---
 
   useEffect(() => {
     const initializePopup = async () => {
       await loadSettings()
+      await loadBlockStats()
+      await loadSubscriptionStatus()
       await getCurrentTab()
     }
     initializePopup()
@@ -57,6 +124,23 @@ function IndexPopup() {
       setLoading(false)
     }
   }, [currentTab])
+
+  // Listen for content blocking events from content script
+  useEffect(() => {
+    const handleMessage = async (
+      message: any,
+      sender: any,
+      sendResponse: any
+    ) => {
+      if (message.action === "contentBlocked") {
+        const success = await handleContentBlocked(message.type, message.count)
+        sendResponse({ success })
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(handleMessage)
+    return () => chrome.runtime.onMessage.removeListener(handleMessage)
+  }, [subscriptionStatus])
 
   const loadSettings = async () => {
     try {
@@ -76,18 +160,162 @@ function IndexPopup() {
           typeof loadedSettings.threshold === "string"
             ? parseFloat(loadedSettings.threshold) || 0.5
             : loadedSettings.threshold || 0.5,
-        blockingMode: (["highlight", "blur", "hide"].includes(
-          loadedSettings.blockingMode
-        )
+        blockingMode: (["blur", "hide"].includes(loadedSettings.blockingMode)
           ? loadedSettings.blockingMode
-          : "highlight") as "highlight" | "blur" | "hide",
-        showNotifications: parseBooleanFromStorage(
-          loadedSettings.showNotifications
-        )
+          : "blur") as "blur" | "hide"
       })
     } catch (error) {
       console.error("Failed to load settings:", error)
     }
+  }
+
+  const loadBlockStats = async () => {
+    const statsJSON = await storage.get("blockStats")
+    if (statsJSON) {
+      try {
+        setBlockStats(JSON.parse(statsJSON))
+      } catch (e) {
+        console.error("Failed to parse block stats", e)
+      }
+    }
+  }
+
+  const loadSubscriptionStatus = async () => {
+    try {
+      const subscriptionData = await storage.get("subscriptionStatus")
+      if (subscriptionData) {
+        const parsed = JSON.parse(subscriptionData)
+
+        // Check if monthly reset is needed
+        const resetDate = new Date(parsed.usage.resetDate)
+        const now = new Date()
+        const needsReset =
+          now.getMonth() !== resetDate.getMonth() ||
+          now.getFullYear() !== resetDate.getFullYear()
+
+        if (needsReset) {
+          // Reset usage for new month
+          const updatedStatus = {
+            ...parsed,
+            usage: {
+              keywordsUsed: 0,
+              imagesUsed: 0,
+              resetDate: now.toISOString()
+            }
+          }
+          await storage.set("subscriptionStatus", JSON.stringify(updatedStatus))
+          setSubscriptionStatus(updatedStatus)
+        } else {
+          setSubscriptionStatus(parsed)
+        }
+      } else {
+        // Initialize with monthly plan, half used
+        const initialStatus: SubscriptionStatus = {
+          plan: SUBSCRIPTION_PLANS.monthly,
+          usage: {
+            keywordsUsed: 50000,
+            imagesUsed: 2500,
+            resetDate: new Date().toISOString()
+          },
+          isActive: true
+        }
+        await storage.set("subscriptionStatus", JSON.stringify(initialStatus))
+        setSubscriptionStatus(initialStatus)
+      }
+    } catch (error) {
+      console.error("Failed to load subscription status:", error)
+      // Fallback to free plan on error
+      const fallbackStatus: SubscriptionStatus = {
+        plan: SUBSCRIPTION_PLANS.free,
+        usage: {
+          keywordsUsed: 0,
+          imagesUsed: 0,
+          resetDate: new Date().toISOString()
+        },
+        isActive: true
+      }
+      setSubscriptionStatus(fallbackStatus)
+    }
+  }
+
+  const updateUsage = async (keywordsUsed: number, imagesUsed: number) => {
+    const newUsage = {
+      ...subscriptionStatus.usage,
+      keywordsUsed,
+      imagesUsed
+    }
+
+    const newStatus = {
+      ...subscriptionStatus,
+      usage: newUsage
+    }
+
+    setSubscriptionStatus(newStatus)
+    await storage.set("subscriptionStatus", JSON.stringify(newStatus))
+  }
+
+  const checkUsageLimits = () => {
+    const { plan, usage } = subscriptionStatus
+    return {
+      keywordsExceeded: usage.keywordsUsed >= plan.keywordLimit,
+      imagesExceeded: usage.imagesUsed >= plan.imageLimit,
+      keywordsRemaining: Math.max(0, plan.keywordLimit - usage.keywordsUsed),
+      imagesRemaining: Math.max(0, plan.imageLimit - usage.imagesUsed)
+    }
+  }
+
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + "M"
+    } else if (num >= 1000) {
+      return (num / 1000).toFixed(1) + "K"
+    }
+    return num.toString()
+  }
+
+  const getNextResetDate = (): string => {
+    const resetDate = new Date(subscriptionStatus.usage.resetDate)
+    const nextMonth = new Date(
+      resetDate.getFullYear(),
+      resetDate.getMonth() + 1,
+      1
+    )
+    return nextMonth.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    })
+  }
+
+  // Function to handle actual content blocking (called from content script)
+  const handleContentBlocked = async (
+    type: "text" | "image",
+    count: number = 1
+  ) => {
+    const limits = checkUsageLimits()
+
+    if (type === "text" && limits.keywordsExceeded) {
+      console.warn("Keyword limit exceeded, content not blocked")
+      return false
+    }
+
+    if (type === "image" && limits.imagesExceeded) {
+      console.warn("Image limit exceeded, content not blocked")
+      return false
+    }
+
+    const newKeywordsUsed =
+      type === "text"
+        ? subscriptionStatus.usage.keywordsUsed + count
+        : subscriptionStatus.usage.keywordsUsed
+
+    const newImagesUsed =
+      type === "image"
+        ? subscriptionStatus.usage.imagesUsed + count
+        : subscriptionStatus.usage.imagesUsed
+
+    await updateUsage(newKeywordsUsed, newImagesUsed)
+    return true
   }
 
   const getCurrentTab = async () => {
@@ -149,6 +377,15 @@ function IndexPopup() {
   const scanPage = async () => {
     if (!currentTab) return
 
+    // Check usage limits before scanning
+    const limits = checkUsageLimits()
+    if (limits.keywordsExceeded || limits.imagesExceeded) {
+      alert(
+        "Usage limit reached! Please upgrade your plan to continue scanning."
+      )
+      return
+    }
+
     try {
       await chrome.tabs.sendMessage(currentTab.id, { action: "startAnalysis" })
       setTimeout(() => {
@@ -171,13 +408,22 @@ function IndexPopup() {
     }
   }
 
+  const getHostname = (url: string) => {
+    try {
+      return new URL(url).hostname
+    } catch (e) {
+      return url
+    }
+  }
+
   const getStatusInfo = () => {
     // 1. Handle initial or empty states
     if (!analysisResults || analysisResults.length === 0) {
       return {
         className: "safe",
         text: "Page is safe",
-        stats: "No suspicious content detected"
+        number: 0,
+        stats: "0 word or image related to judol in this page"
       }
     }
 
@@ -191,7 +437,8 @@ function IndexPopup() {
       return {
         className: "safe",
         text: "Page is safe",
-        stats: "No suspicious content detected"
+        number: 0,
+        stats: "0 word or image related to judol in this page"
       }
     }
 
@@ -213,14 +460,16 @@ function IndexPopup() {
     if (confidence > 0.8) {
       return {
         className: "danger",
-        text: "High risk content detected",
-        stats: `Confidence: ${Math.round(confidence * 100)}% | Suspicious: ${suspiciousCount} | Keywords: ${keywords.slice(0, 3).join(", ")}`
+        text: "HIGH RISK CONTENT DETECTED",
+        number: suspiciousCount,
+        stats: `${suspiciousCount} word or image related to judol in this page`
       }
     } else {
       return {
         className: "warning",
         text: "Potentially suspicious content",
-        stats: `Confidence: ${Math.round(confidence * 100)}% | Suspicious: ${suspiciousCount} | Keywords: ${keywords.slice(0, 3).join(", ")}`
+        number: suspiciousCount,
+        stats: `${suspiciousCount} word or image related to judol in this page`
       }
     }
   }
@@ -238,32 +487,53 @@ function IndexPopup() {
 
   const statusInfo = getStatusInfo()
 
+  if (view === "settings") {
+    return (
+      <SettingsPage
+        threshold={settings.threshold}
+        onThresholdChange={(value) => updateSetting("threshold", value)}
+        onBack={() => setView("main")}
+      />
+    )
+  }
+
   return (
     <div className="popup-container">
       <div className="header">
-        <h1>🛡️ Judol Blocker</h1>
-        <p>Keep your browsing safe</p>
+        <img src={headerImage} className="logo" alt="Logo" />
+        <img
+          src={settingsImage}
+          className="settings-icon"
+          alt="Settings"
+          onClick={() => setView("settings")}
+        />
       </div>
-
-      <div className="main-content">
-        <div className="status-section">
-          <div className={`status-indicator ${statusInfo.className}`}>
-            <div className={`status-dot ${statusInfo.className}`}></div>
-            <div className="status-text">{statusInfo.text}</div>
+      <div className="inner-container">
+        <div className="main-content">
+          <div className="page-url" title={currentTab?.url}>
+            {currentTab?.url ? getHostname(currentTab.url) : "Current Page"}
           </div>
-          <div className="stats" title={statusInfo.stats}>
-            {statusInfo.stats}
-          </div>
-        </div>
 
-        <div className="controls-section">
-          <div className="control-group">
-            <label>Extension Status</label>
-            <button
-              className={`toggle-btn ${settings.enabled ? "active" : ""}`}
-              onClick={() => updateSetting("enabled", !settings.enabled)}>
-              {settings.enabled ? "🟢 Enabled" : "🔴 Disabled"}
-            </button>
+          <div className="status-section">
+            <div className={`status-indicator ${statusInfo.className}`}>
+              <div className={`status-dot ${statusInfo.className}`}></div>
+              <div className={`status-text ${statusInfo.className}`}>
+                {statusInfo.text}
+              </div>
+            </div>
+            <div className="stats" title={statusInfo.stats}>
+              {statusInfo.number > 0 ? (
+                <>
+                  <span className="suspicious-count">{statusInfo.number}</span>{" "}
+                  word or image related to judol in this page
+                </>
+              ) : (
+                <>
+                  <span className="safe-count">0</span> word or image related to
+                  judol in this page
+                </>
+              )}
+            </div>
           </div>
 
           <div className="control-group">
@@ -272,48 +542,112 @@ function IndexPopup() {
               id="blocking-mode"
               value={settings.blockingMode}
               onChange={(e) => updateSetting("blockingMode", e.target.value)}>
-              <option value="highlight">Highlight</option>
               <option value="blur">Blur</option>
               <option value="hide">Hide</option>
             </select>
           </div>
 
-          <div className="control-group">
-            <label htmlFor="threshold">
-              Detection Threshold: {Math.round(settings.threshold * 100)}%
-            </label>
-            <input
-              type="range"
-              id="threshold"
-              min="0"
-              max="1"
-              step="0.1"
-              value={settings.threshold}
-              onChange={(e) =>
-                updateSetting("threshold", parseFloat(e.target.value))
-              }
-            />
+          <div className="stats-section">
+            <div className="stats-title">BLOCKED AMOUNT</div>
+            <div className="stats-container">
+              {/* WORD BLOCKS */}
+              <div className="stat-item">
+                <div className="progress-bar-container large">
+                  <div
+                    className="progress-bar large"
+                    style={{
+                      width: `${Math.min((subscriptionStatus.usage.keywordsUsed / subscriptionStatus.plan.keywordLimit) * 100, 100)}%`
+                    }}></div>
+                </div>
+                <div className="progress-labels">
+                  <span className="progress-label min">0</span>
+                  <span className="progress-label mid">
+                    {formatNumber(subscriptionStatus.plan.keywordLimit / 2)}
+                  </span>
+                  <span className="progress-label max">
+                    {formatNumber(subscriptionStatus.plan.keywordLimit)}
+                  </span>
+                </div>
+                <div className="blocks-left">
+                  <span className="blocks-left-number">
+                    {formatNumber(
+                      subscriptionStatus.plan.keywordLimit -
+                        subscriptionStatus.usage.keywordsUsed
+                    )}
+                  </span>{" "}
+                  word blocks left this month
+                </div>
+              </div>
+              {/* IMAGE BLOCKS */}
+              <div className="stat-item">
+                <div className="progress-bar-container large">
+                  <div
+                    className="progress-bar large"
+                    style={{
+                      width: `${Math.min((subscriptionStatus.usage.imagesUsed / subscriptionStatus.plan.imageLimit) * 100, 100)}%`
+                    }}></div>
+                </div>
+                <div className="progress-labels">
+                  <span className="progress-label min">0</span>
+                  <span className="progress-label mid">
+                    {formatNumber(subscriptionStatus.plan.imageLimit / 2)}
+                  </span>
+                  <span className="progress-label max">
+                    {formatNumber(subscriptionStatus.plan.imageLimit)}
+                  </span>
+                </div>
+                <div className="blocks-left">
+                  <span className="blocks-left-number">
+                    {formatNumber(
+                      subscriptionStatus.plan.imageLimit -
+                        subscriptionStatus.usage.imagesUsed
+                    )}
+                  </span>{" "}
+                  image blocks left this month
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="control-group">
-            <label>Notifications</label>
-            <button
-              className={`toggle-btn ${settings.showNotifications ? "active" : ""}`}
-              onClick={() =>
-                updateSetting("showNotifications", !settings.showNotifications)
-              }>
-              {settings.showNotifications ? "🔔 On" : "🔕 Off"}
+          <div className="controls-section">
+            <div className="control-group">
+              <label>Status</label>
+              <button
+                className={`status-pill ${settings.enabled ? "enabled" : "disabled"}`}
+                onClick={() => updateSetting("enabled", !settings.enabled)}>
+                <span className="status-pill-icon">
+                  {settings.enabled ? (
+                    <svg
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="12" cy="12" r="12" fill="#1DCD9F" />
+                      <polygon points="10,8 16,12 10,16" fill="#fff" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="12" cy="12" r="12" fill="#FF4D4F" />
+                      <rect x="8" y="8" width="2.5" height="8" fill="#fff" />
+                      <rect x="13.5" y="8" width="2.5" height="8" fill="#fff" />
+                    </svg>
+                  )}
+                </span>
+                <span className="status-pill-label">
+                  {settings.enabled ? "ENABLE" : "DISABLE"}
+                </span>
+              </button>
+            </div>
+            <button className="subscribe-btn">
+              SUBSCRIBE FOR UNLIMITED BLOCK
             </button>
           </div>
-        </div>
-
-        <div className="actions-section">
-          <button className="action-btn primary" onClick={scanPage}>
-            🔍 Scan Page
-          </button>
-          <button className="action-btn secondary" onClick={clearHighlights}>
-            ✨ Clear Highlights
-          </button>
         </div>
       </div>
     </div>

@@ -2,6 +2,78 @@ import type { PlasmoCSConfig } from "plasmo"
 
 import { Storage } from "@plasmohq/storage"
 
+// --- STYLE INJECTION ---
+// We inject styles directly into the head to ensure they are always applied
+// and have priority over the website's own styles.
+const BJE_STYLE_ID = "block-judol-engine-styles"
+
+function injectStyles() {
+  if (document.getElementById(BJE_STYLE_ID)) {
+    return
+  }
+
+  const style = document.createElement("style")
+  style.id = BJE_STYLE_ID
+  style.textContent = `
+    .judol-highlighted {
+      background-color: yellow !important;
+      border: 2px solid red !important;
+      border-radius: 4px;
+    }
+    
+    .judol-blur-wrapper {
+      position: relative !important;
+      display: inline-block !important;
+      vertical-align: top; /* Helps with layout */
+    }
+    
+    .judol-blur-overlay {
+      position: absolute !important;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5) !important;
+      backdrop-filter: blur(8px) !important;
+      -webkit-backdrop-filter: blur(8px) !important;
+      z-index: 999999 !important;
+      display: flex !important;
+      justify-content: center !important;
+      align-items: center !important;
+      color: white !important;
+      font-family: sans-serif;
+      font-size: 14px;
+      text-align: center;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    .judol-overlay-content {
+      padding: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border-radius: 5px;
+      pointer-events: none; /* Allow clicks to go to the button */
+    }
+    
+    .judol-unblur-btn {
+      margin-top: 8px !important;
+      padding: 4px 10px !important;
+      border: 1px solid #ccc !important;
+      background-color: #f0f0f0 !important;
+      color: #333 !important;
+      cursor: pointer !important;
+      border-radius: 3px !important;
+      pointer-events: all; /* Make sure the button is clickable */
+    }
+    
+    .judol-unblur-btn:hover {
+      background-color: #e0e0e0 !important;
+    }
+  `
+  document.head.appendChild(style)
+}
+// --- END STYLE INJECTION ---
+
 export const config: PlasmoCSConfig = {
   matches: ["<all_urls>"],
   all_frames: false
@@ -11,7 +83,6 @@ interface Settings {
   enabled: boolean
   threshold: number
   blockingMode: "highlight" | "blur" | "hide"
-  showNotifications: boolean
 }
 
 // --- NEW Interfaces to match backend ---
@@ -37,13 +108,16 @@ let analysisResults: AnalysisResult[] | null = null
 let settings: Settings = {
   enabled: true,
   threshold: 0.5,
-  blockingMode: "highlight",
-  showNotifications: true
+  blockingMode: "highlight"
 }
 
 // Initialize the content script
 async function init() {
   console.log("Judol Detector: Initializing content script.")
+
+  // --- Inject styles as the first step ---
+  injectStyles()
+
   // Get settings
   settings = await getSettings()
   console.log("Judol Detector: Settings loaded:", settings)
@@ -67,16 +141,13 @@ async function getSettings(): Promise<Settings> {
     const enabled = await storage.get("enabled")
     const threshold = await storage.get("threshold")
     const blockingMode = await storage.get("blockingMode")
-    const showNotifications = await storage.get("showNotifications")
 
     const loadedSettings = {
       enabled: enabled === undefined ? true : Boolean(enabled),
       threshold: typeof threshold === "number" ? threshold : 0.5,
       blockingMode: (["highlight", "blur", "hide"].includes(blockingMode)
         ? blockingMode
-        : "highlight") as "highlight" | "blur" | "hide",
-      showNotifications:
-        showNotifications === undefined ? true : Boolean(showNotifications)
+        : "highlight") as "highlight" | "blur" | "hide"
     }
     console.log("Judol Detector: Loaded settings from storage:", loadedSettings)
     return loadedSettings
@@ -85,8 +156,7 @@ async function getSettings(): Promise<Settings> {
     return {
       enabled: true,
       threshold: 0.5,
-      blockingMode: "highlight",
-      showNotifications: true
+      blockingMode: "highlight"
     }
   }
 }
@@ -187,22 +257,60 @@ async function startAnalysis() {
   }
 }
 
+// Get stored block stats
+async function getBlockStats(): Promise<{ text: number; images: number }> {
+  const statsJSON = await storage.get("blockStats")
+  try {
+    if (statsJSON) {
+      const stats = JSON.parse(statsJSON)
+      return {
+        text: stats.text || 0,
+        images: stats.images || 0
+      }
+    }
+  } catch (e) {
+    // ignore parsing errors and return default
+  }
+  return { text: 0, images: 0 }
+}
+
 // Process analysis results
 function processAnalysisResults(results: AnalysisResult[]) {
   console.log("Judol Detector: Processing analysis results:", results)
 
-  // Start observing for future DOM changes
-  observeDynamicContent()
+  // --- FIX: Disconnect observer to prevent infinite loops ---
+  if (observer) {
+    observer.disconnect()
+    console.log(
+      "Judol Detector: Observer disconnected during DOM manipulation."
+    )
+  }
+
+  // Clear any existing highlights *before* processing new results
+  clearHighlights()
 
   if (!results || results.length === 0) {
     console.log(
       "Judol Detector: No suspicious content found or analysis results are missing."
     )
+    // Reconnect observer and exit if there's nothing to do
+    if (observer) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["src", "href"]
+      })
+    }
     return
   }
 
+  const suspiciousItems = results.filter(
+    (item) => item.confidence >= settings.threshold
+  )
+
   // Find the highest confidence score from all results
-  const maxConfidence = results.reduce(
+  const maxConfidence = suspiciousItems.reduce(
     (max, item) => Math.max(max, item.confidence),
     0
   )
@@ -216,6 +324,26 @@ function processAnalysisResults(results: AnalysisResult[]) {
       "Judol Detector: Confidence is above threshold. Applying blocking mode:",
       settings.blockingMode
     )
+
+    // Increment block stats
+    const textBlocked = suspiciousItems.filter(
+      (item) => item.type === "text"
+    ).length
+    const imagesBlocked = suspiciousItems.filter(
+      (item) => item.type === "image_url"
+    ).length
+
+    if (textBlocked > 0 || imagesBlocked > 0) {
+      getBlockStats().then((stats) => {
+        const newStats = {
+          text: stats.text + textBlocked,
+          images: stats.images + imagesBlocked
+        }
+        storage.set("blockStats", JSON.stringify(newStats))
+        console.log("Judol Detector: Updated block stats:", newStats)
+      })
+    }
+
     // Apply blocking based on mode, passing the results to each function
     if (settings.blockingMode === "highlight") {
       highlightSuspiciousContent(results)
@@ -224,18 +352,17 @@ function processAnalysisResults(results: AnalysisResult[]) {
     } else if (settings.blockingMode === "hide") {
       hideSuspiciousContent(results)
     }
+  }
 
-    // Show notification if enabled
-    if (settings.showNotifications) {
-      sendMessage({
-        action: "showNotification",
-        data: {
-          message: `Suspicious gambling content detected (${Math.round(
-            maxConfidence * 100
-          )}% confidence)`
-        }
-      })
-    }
+  // --- FIX: Reconnect observer after all DOM changes are done ---
+  if (observer) {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src", "href"]
+    })
+    console.log("Judol Detector: Observer reconnected.")
   }
 }
 
@@ -272,11 +399,12 @@ function highlightSuspiciousContent(results: AnalysisResult[]) {
             )
             return
           }
-          domElement.style.backgroundColor = "yellow"
-          domElement.style.border = "2px solid red"
+          domElement.classList.add("judol-highlighted")
           domElement.title = `Suspicious content detected with ${
             element.confidence * 100
-          }% confidence. Keywords: ${element.details.matched_keywords?.join(", ")}`
+          }% confidence. Keywords: ${element.details.matched_keywords?.join(
+            ", "
+          )}`
         })
       } catch (e) {
         console.error(
@@ -320,34 +448,18 @@ function blurSuspiciousContent(results: AnalysisResult[]) {
           // Avoid re-wrapping
           if (!wrapper.classList.contains("judol-blur-wrapper")) {
             wrapper.classList.add("judol-blur-wrapper")
-            wrapper.style.position = "relative"
-            wrapper.style.display = "inline-block" // Or block, depending on element
             domElement.parentNode.insertBefore(wrapper, domElement)
             wrapper.appendChild(domElement)
           }
 
+          // Avoid adding multiple overlays
+          if (wrapper.querySelector(".judol-blur-overlay")) {
+            return
+          }
+
           const overlay = document.createElement("div")
           overlay.classList.add("judol-blur-overlay")
-          overlay.style.position = "absolute"
-          overlay.style.top = "0"
-          overlay.style.left = "0"
-          overlay.style.width = "100%"
-          overlay.style.height = "100%"
-          overlay.style.backgroundColor = "rgba(255, 255, 255, 0.5)"
-          overlay.style.backdropFilter = "blur(10px)"
-          overlay.style.zIndex = "9998"
-          overlay.style.textAlign = "center"
-          overlay.style.color = "black"
-          overlay.style.fontSize = "14px"
-          overlay.style.display = "flex"
-          overlay.style.justifyContent = "center"
-          overlay.style.alignItems = "center"
-          overlay.innerHTML = `
-            <div style="padding: 10px; background: white; border-radius: 5px;">
-              Potentially suspicious content hidden.<br/>
-              (Confidence: ${Math.round(element.confidence * 100)}%)
-              <button class="judol-unblur-btn" style="margin-left: 10px; padding: 2px 5px; border: 1px solid #ccc; cursor: pointer;">Show</button>
-            </div>`
+          overlay.innerHTML = `<button class="judol-unblur-btn">Show</button>`
           wrapper.appendChild(overlay)
 
           const unblurBtn = overlay.querySelector(
@@ -392,6 +504,7 @@ function hideSuspiciousContent(results: AnalysisResult[]) {
             return
           }
           domElement.style.display = "none"
+          domElement.classList.add("judol-hidden")
         })
       } catch (e) {
         console.error(
@@ -406,21 +519,22 @@ function hideSuspiciousContent(results: AnalysisResult[]) {
 // Clear all highlights, blurs, etc.
 function clearHighlights() {
   console.log("Judol Detector: Clearing all visual markers.")
-  const highlighted = document.querySelectorAll(
-    '[style*="background-color: yellow"]'
-  )
+  // Remove highlight class
+  const highlighted = document.querySelectorAll(".judol-highlighted")
   highlighted.forEach((el: HTMLElement) => {
-    el.style.backgroundColor = ""
-    el.style.border = ""
+    el.classList.remove("judol-highlighted")
     el.title = ""
   })
 
+  // Remove blur overlays
   const blurOverlays = document.querySelectorAll(".judol-blur-overlay")
   blurOverlays.forEach((overlay) => overlay.remove())
 
-  // Restore hidden elements (this is tricky, might need a better approach)
-  // For now, let's assume we don't restore hidden elements on the fly
-  // unless we add a class to track them.
+  // Restore hidden elements
+  const hidden = document.querySelectorAll(".judol-hidden")
+  hidden.forEach((el: HTMLElement) => {
+    el.classList.remove("judol-hidden")
+  })
 }
 
 let observer: MutationObserver | null = null
@@ -433,28 +547,27 @@ function observeDynamicContent() {
   }
 
   const targetNode = document.body
-  if (!targetNode) {
-    console.log("Judol Detector: Could not find document.body to observe.")
-    return
+  const config = {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["src", "href"]
   }
-
-  const config = { childList: true, subtree: true }
 
   const callback = function (
     mutationsList: MutationRecord[],
     obs: MutationObserver
   ) {
-    const hasAddedNodes = mutationsList.some((m) => m.addedNodes.length > 0)
-
-    if (hasAddedNodes) {
-      console.log("Judol Detector: Dynamic content change detected.")
-      window.clearTimeout(debounceTimeout)
-      debounceTimeout = window.setTimeout(() => {
-        console.log("Judol Detector: Re-running analysis for dynamic content.")
-        clearHighlights()
-        startAnalysis()
-      }, 1000) // 1-second debounce
+    // Debounce re-analysis to avoid performance issues
+    if (reanalysisTimer) {
+      clearTimeout(reanalysisTimer)
     }
+    reanalysisTimer = setTimeout(() => {
+      console.log("Judol Detector: Dynamic content change detected.")
+      console.log("Judol Detector: Re-running analysis for dynamic content.")
+      // No need to clear highlights here, processAnalysisResults does it.
+      startAnalysis()
+    }, 500) // Debounce for 500ms
   }
 
   observer = new MutationObserver(callback)
@@ -463,6 +576,8 @@ function observeDynamicContent() {
     "Judol Detector: MutationObserver is now watching for dynamic content."
   )
 }
+
+let reanalysisTimer: NodeJS.Timeout | null = null
 
 // Send message to background script
 function sendMessage(message) {
@@ -492,10 +607,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     )
     settings = request.settings
     // Refresh the highlighting/blurring based on new settings
-    if (analysisResults && analysisResults.length > 0) {
-      clearHighlights()
-      processAnalysisResults(analysisResults)
-    }
+    // This will disconnect the observer, clear, and then re-apply with new settings
+    startAnalysis()
     sendResponse({ success: true })
     return true
   }
