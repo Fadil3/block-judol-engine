@@ -53,7 +53,7 @@ cd /home/seryu/projects/block-judol-engine
 python api_server.py
 ```
 
-The extension will communicate with the API server at `http://localhost:8000`.
+The extension will communicate with the API server at `https://block-engine.server-fadil.my.id`.
 
 ## Project Structure
 

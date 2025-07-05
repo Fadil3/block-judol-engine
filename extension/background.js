@@ -1,6 +1,6 @@
 // Background script for the Judol Content Blocker extension
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = "https://block-engine.server-fadil.my.id";
 
 // Extension installation
 chrome.runtime.onInstalled.addListener(() => {
@@ -65,7 +65,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.type === "analyze_html_and_images") {
     // New endpoint for combined analysis
-    fetch("http://localhost:8000/analyze/html", {
+    fetch("https://block-engine.server-fadil.my.id/analyze/html", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -94,7 +94,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })
       .catch((error) => console.error("Error in combined analysis:", error));
   } else if (request.type === "analyze_images_and_text") {
-    fetch("http://localhost:8000/analyze/html", {
+    fetch("https://block-engine.server-fadil.my.id/analyze/html", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

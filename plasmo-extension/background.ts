@@ -1,6 +1,6 @@
 import { Storage } from "@plasmohq/storage"
 
-const API_BASE_URL = "http://localhost:8000"
+const API_BASE_URL = "https://block-engine.server-fadil.my.id"
 const storage = new Storage()
 
 // Extension installation or update

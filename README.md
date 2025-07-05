@@ -108,7 +108,7 @@ The entire system is designed to run in Docker containers for consistency and ea
     - Pull the official Redis image.
     - Start both the API server and the Redis cache.
 
-    The API will be available at `http://localhost:8000`.
+    The API will be available at `https://block-engine.server-fadil.my.id`.
 
 2.  **Install the Browser Extension:**
     - Navigate to `chrome://extensions/`.
@@ -123,13 +123,13 @@ The entire system is designed to run in Docker containers for consistency and ea
 #### Health Check
 
 ```bash
-curl http://localhost:8000/health
+curl https://block-engine.server-fadil.my.id/health
 ```
 
 #### Analyze HTML Content
 
 ```bash
-curl -X POST http://localhost:8000/analyze/html \
+curl -X POST https://block-engine.server-fadil.my.id/analyze/html \
   -H "Content-Type: application/json" \
   -d '{"html": "<html>...</html>", "url": "https://example.com"}'
 ```

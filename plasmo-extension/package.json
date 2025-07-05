@@ -26,8 +26,7 @@
   },
   "manifest": {
     "host_permissions": [
-      "http://localhost:8000/*",
-      "https://localhost:8000/*",
+      "https://block-engine.server-fadil.my.id/*",
       "http://*/*",
       "https://*/*"
     ],
